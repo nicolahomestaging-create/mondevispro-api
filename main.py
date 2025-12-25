@@ -78,6 +78,15 @@ class DevisRequest(BaseModel):
     delai_realisation: str = "À définir"
     validite_jours: int = 30
 
+class DevisDataFromAI(BaseModel):
+    client_nom: str
+    prestations: List[Prestation]
+    delai: str = "À définir"
+
+class DevisRequestSimple(BaseModel):
+    entreprise: Entreprise
+    devis_data: DevisDataFromAI
+
 
 # ==================== GÉNÉRATION PDF ====================
 
@@ -302,6 +311,38 @@ async def generer_devis_endpoint(data: DevisRequest):
     """Génère un devis PDF et retourne les informations"""
     try:
         filepath, numero_devis, total_ttc = generer_pdf(data)
+        
+        return {
+            "success": True,
+            "numero_devis": numero_devis,
+            "total_ttc": total_ttc,
+            "pdf_filename": os.path.basename(filepath),
+            "pdf_url": f"/download/{os.path.basename(filepath)}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generer-devis-simple")
+async def generer_devis_simple_endpoint(data: DevisRequestSimple):
+    """Génère un devis PDF depuis le format simplifié (avec devis_data d'OpenAI)"""
+    try:
+        # Convertir le format simple vers le format complet
+        full_data = DevisRequest(
+            entreprise=data.entreprise,
+            client=Client(
+                nom=data.devis_data.client_nom,
+                adresse="",
+                cp_ville="",
+                tel=""
+            ),
+            prestations=data.devis_data.prestations,
+            tva_taux=20.0,
+            conditions_paiement="30% à la commande, solde à réception",
+            delai_realisation=data.devis_data.delai
+        )
+        
+        filepath, numero_devis, total_ttc = generer_pdf(full_data)
         
         return {
             "success": True,
