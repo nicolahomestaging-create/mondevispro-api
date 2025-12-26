@@ -11,16 +11,19 @@ from typing import List, Optional
 import os
 import uuid
 from datetime import datetime, timedelta
+import requests
+from io import BytesIO
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 
 app = FastAPI(
     title="MonDevisPro API",
     description="API de génération de devis PDF professionnels",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 # CORS pour permettre les appels depuis Make.com et le site web
@@ -58,7 +61,7 @@ class Entreprise(BaseModel):
     gerant: Optional[str] = ""
     siret: str
     adresse: str
-    cp_ville: str
+    cp_ville: Optional[str] = ""
     tel: str
     email: str
     logo_url: Optional[str] = None
@@ -88,6 +91,40 @@ class DevisRequestSimple(BaseModel):
     devis_data: DevisDataFromAI
 
 
+# ==================== FONCTIONS UTILITAIRES ====================
+
+def telecharger_logo(logo_url: str) -> Optional[ImageReader]:
+    """Télécharge le logo depuis l'URL et retourne un ImageReader"""
+    try:
+        if not logo_url or logo_url.strip() == "":
+            return None
+        
+        response = requests.get(logo_url, timeout=10)
+        if response.status_code == 200:
+            image_data = BytesIO(response.content)
+            return ImageReader(image_data)
+    except Exception as e:
+        print(f"Erreur téléchargement logo: {e}")
+    return None
+
+
+def tronquer_texte(texte: str, max_chars: int) -> str:
+    """Tronque le texte s'il dépasse la limite"""
+    if len(texte) <= max_chars:
+        return texte
+    return texte[:max_chars-3] + "..."
+
+
+def formater_adresse_complete(adresse: str, cp_ville: str) -> str:
+    """Combine adresse et cp_ville sur une seule ligne"""
+    parties = []
+    if adresse and adresse.strip():
+        parties.append(adresse.strip())
+    if cp_ville and cp_ville.strip():
+        parties.append(cp_ville.strip())
+    return ", ".join(parties) if parties else ""
+
+
 # ==================== GÉNÉRATION PDF ====================
 
 def generer_pdf(data: DevisRequest) -> str:
@@ -102,6 +139,9 @@ def generer_pdf(data: DevisRequest) -> str:
     date_devis = datetime.now().strftime("%d/%m/%Y")
     date_validite = (datetime.now() + timedelta(days=data.validite_jours)).strftime("%d/%m/%Y")
     
+    # Télécharger le logo
+    logo = telecharger_logo(data.entreprise.logo_url)
+    
     # Création du canvas
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
@@ -109,31 +149,52 @@ def generer_pdf(data: DevisRequest) -> str:
     # ==================== EN-TÊTE ====================
     
     c.setFillColor(BLEU_PRINCIPAL)
-    c.rect(0, height - 40*mm, width, 40*mm, fill=True, stroke=False)
+    c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
+    
+    # Position X de départ pour le texte (après le logo si présent)
+    text_start_x = 15*mm
+    
+    # Logo (si disponible)
+    if logo:
+        try:
+            # Logo en haut à gauche, taille 35x35mm max
+            logo_size = 30*mm
+            logo_x = 15*mm
+            logo_y = height - 40*mm
+            c.drawImage(logo, logo_x, logo_y, width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
+            text_start_x = 50*mm  # Décaler le texte après le logo
+        except Exception as e:
+            print(f"Erreur affichage logo: {e}")
     
     # Nom entreprise
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 20)
-    c.drawString(15*mm, height - 20*mm, data.entreprise.nom.upper())
+    c.setFont("Helvetica-Bold", 18)
+    nom_entreprise = tronquer_texte(data.entreprise.nom.upper(), 30)
+    c.drawString(text_start_x, height - 18*mm, nom_entreprise)
     
-    # Gérant
-    c.setFont("Helvetica", 9)
-    c.drawString(15*mm, height - 28*mm, f"Gérant : {data.entreprise.gerant}")
+    # Gérant (si renseigné)
+    if data.entreprise.gerant and data.entreprise.gerant.strip():
+        c.setFont("Helvetica", 9)
+        c.drawString(text_start_x, height - 26*mm, f"Gérant : {data.entreprise.gerant}")
     
     # DEVIS à droite
     c.setFont("Helvetica-Bold", 28)
-    c.drawRightString(width - 20*mm, height - 20*mm, "DEVIS")
+    c.drawRightString(width - 20*mm, height - 18*mm, "DEVIS")
     
     c.setFont("Helvetica", 11)
     c.drawRightString(width - 20*mm, height - 28*mm, f"N° {numero_devis}")
     
+    # Date dans l'en-tête
+    c.setFont("Helvetica", 9)
+    c.drawRightString(width - 20*mm, height - 36*mm, f"Date : {date_devis}")
+    
     # ==================== INFOS ENTREPRISE & CLIENT ====================
     
-    y_position = height - 55*mm
+    y_position = height - 60*mm
     
     # Bloc entreprise
     c.setFillColor(GRIS_CLAIR)
-    c.roundRect(15*mm, y_position - 35*mm, 85*mm, 40*mm, 3*mm, fill=True, stroke=False)
+    c.roundRect(15*mm, y_position - 32*mm, 85*mm, 38*mm, 3*mm, fill=True, stroke=False)
     
     c.setFillColor(BLEU_PRINCIPAL)
     c.setFont("Helvetica-Bold", 10)
@@ -142,16 +203,27 @@ def generer_pdf(data: DevisRequest) -> str:
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica", 9)
     y_text = y_position - 8*mm
-    c.drawString(20*mm, y_text, data.entreprise.nom)
-    c.drawString(20*mm, y_text - 4*mm, data.entreprise.adresse)
-    c.drawString(20*mm, y_text - 8*mm, data.entreprise.cp_ville)
-    c.drawString(20*mm, y_text - 12*mm, f"Tél : {data.entreprise.tel}")
-    c.drawString(20*mm, y_text - 16*mm, f"Email : {data.entreprise.email}")
+    
+    # Nom entreprise
+    c.drawString(20*mm, y_text, tronquer_texte(data.entreprise.nom, 40))
+    
+    # Adresse complète sur une ligne (tronquée si trop longue)
+    adresse_complete = formater_adresse_complete(data.entreprise.adresse, data.entreprise.cp_ville)
+    if adresse_complete:
+        c.drawString(20*mm, y_text - 5*mm, tronquer_texte(adresse_complete, 45))
+    
+    # Téléphone
+    c.drawString(20*mm, y_text - 10*mm, f"Tél : {data.entreprise.tel}")
+    
+    # Email (tronqué si nécessaire)
+    c.drawString(20*mm, y_text - 15*mm, f"Email : {tronquer_texte(data.entreprise.email, 35)}")
+    
+    # SIRET
     c.drawString(20*mm, y_text - 20*mm, f"SIRET : {data.entreprise.siret}")
     
     # Bloc client
     c.setFillColor(GRIS_CLAIR)
-    c.roundRect(110*mm, y_position - 35*mm, 85*mm, 40*mm, 3*mm, fill=True, stroke=False)
+    c.roundRect(110*mm, y_position - 32*mm, 85*mm, 38*mm, 3*mm, fill=True, stroke=False)
     
     c.setFillColor(BLEU_PRINCIPAL)
     c.setFont("Helvetica-Bold", 10)
@@ -162,21 +234,20 @@ def generer_pdf(data: DevisRequest) -> str:
     y_text = y_position - 8*mm
     c.drawString(115*mm, y_text, data.client.nom)
     if data.client.adresse:
-        c.drawString(115*mm, y_text - 4*mm, data.client.adresse)
+        c.drawString(115*mm, y_text - 5*mm, tronquer_texte(data.client.adresse, 40))
     if data.client.cp_ville:
-        c.drawString(115*mm, y_text - 8*mm, data.client.cp_ville)
+        c.drawString(115*mm, y_text - 10*mm, data.client.cp_ville)
     if data.client.tel:
-        c.drawString(115*mm, y_text - 12*mm, f"Tél : {data.client.tel}")
+        c.drawString(115*mm, y_text - 15*mm, f"Tél : {data.client.tel}")
     
-    # Dates
+    # Validité
     c.setFillColor(GRIS_TEXTE)
     c.setFont("Helvetica", 9)
-    c.drawRightString(width - 20*mm, y_position - 25*mm, f"Date : {date_devis}")
-    c.drawRightString(width - 20*mm, y_position - 30*mm, f"Validité : {date_validite}")
+    c.drawRightString(width - 20*mm, y_position - 25*mm, f"Validité : {date_validite}")
     
     # ==================== TABLEAU PRESTATIONS ====================
     
-    y_table = y_position - 55*mm
+    y_table = y_position - 50*mm
     
     # En-tête tableau
     c.setFillColor(BLEU_PRINCIPAL)
@@ -205,7 +276,7 @@ def generer_pdf(data: DevisRequest) -> str:
         
         c.setFillColor(GRIS_FONCE)
         c.setFont("Helvetica", 9)
-        c.drawString(18*mm, y_ligne + 2*mm, prestation.description[:50])
+        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(prestation.description, 50))
         c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
         c.drawString(120*mm, y_ligne + 2*mm, prestation.unite)
         c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
@@ -286,9 +357,15 @@ def generer_pdf(data: DevisRequest) -> str:
     
     c.setFillColor(GRIS_TEXTE)
     c.setFont("Helvetica", 7)
+    
+    # Pied de page avec adresse complète
+    adresse_pied = formater_adresse_complete(data.entreprise.adresse, data.entreprise.cp_ville)
     c.drawCentredString(width/2, 18*mm, f"{data.entreprise.nom} - SIRET {data.entreprise.siret}")
-    c.drawCentredString(width/2, 13*mm, f"{data.entreprise.adresse}, {data.entreprise.cp_ville} - Tél : {data.entreprise.tel}")
-    c.drawCentredString(width/2, 8*mm, f"TVA intracommunautaire : FR{data.entreprise.siret.replace(' ', '')[:9]}")
+    c.drawCentredString(width/2, 13*mm, f"{adresse_pied} - Tél : {data.entreprise.tel}")
+    
+    # TVA intracommunautaire
+    siret_clean = data.entreprise.siret.replace(' ', '').replace('.', '')
+    c.drawCentredString(width/2, 8*mm, f"TVA intracommunautaire : FR{siret_clean[:9] if len(siret_clean) >= 9 else siret_clean}")
     
     c.setFillColor(BLEU_CLAIR)
     c.setFont("Helvetica-Oblique", 6)
@@ -303,7 +380,7 @@ def generer_pdf(data: DevisRequest) -> str:
 
 @app.get("/")
 def root():
-    return {"message": "MonDevisPro API", "version": "1.0.0", "status": "ok"}
+    return {"message": "MonDevisPro API", "version": "1.1.0", "status": "ok"}
 
 
 @app.post("/generer-devis")
