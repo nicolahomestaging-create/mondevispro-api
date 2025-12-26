@@ -204,25 +204,51 @@ def generer_pdf(data: DevisRequest) -> str:
     c.setFont("Helvetica", 9)
     y_text = y_position - 8*mm
     
-    # Nom entreprise
+  # Nom entreprise
     c.drawString(20*mm, y_text, tronquer_texte(data.entreprise.nom, 40))
     
-   # Adresse sur une ligne
-    if data.entreprise.adresse:
-        c.drawString(20*mm, y_text - 5*mm, tronquer_texte(data.entreprise.adresse, 42))
+    # Adresse - on la coupe en 2 si trop longue
+    adresse = data.entreprise.adresse if data.entreprise.adresse else ""
+    cp_ville = data.entreprise.cp_ville if data.entreprise.cp_ville else ""
     
-    # CP + Ville sur une autre ligne
-    if data.entreprise.cp_ville:
-        c.drawString(20*mm, y_text - 10*mm, tronquer_texte(data.entreprise.cp_ville, 42))
+    ligne_y = y_text - 5*mm
+    
+    # Si adresse courte, tout sur une ligne
+    if len(adresse) <= 35:
+        if adresse:
+            c.drawString(20*mm, ligne_y, adresse)
+            ligne_y -= 5*mm
+    else:
+        # Adresse longue : couper en 2
+        mots = adresse.split()
+        ligne1 = ""
+        ligne2 = ""
+        for mot in mots:
+            if len(ligne1 + " " + mot) <= 35:
+                ligne1 = (ligne1 + " " + mot).strip()
+            else:
+                ligne2 = (ligne2 + " " + mot).strip()
+        c.drawString(20*mm, ligne_y, ligne1)
+        ligne_y -= 5*mm
+        if ligne2:
+            c.drawString(20*mm, ligne_y, ligne2)
+            ligne_y -= 5*mm
+    
+    # CP Ville
+    if cp_ville:
+        c.drawString(20*mm, ligne_y, cp_ville)
+        ligne_y -= 5*mm
     
     # Téléphone
-    c.drawString(20*mm, y_text - 15*mm, f"Tél : {data.entreprise.tel}")
+    c.drawString(20*mm, ligne_y, f"Tél : {data.entreprise.tel}")
+    ligne_y -= 5*mm
     
-    # Email (tronqué si nécessaire)
-    c.drawString(20*mm, y_text - 20*mm, f"Email : {tronquer_texte(data.entreprise.email, 35)}")
+    # Email
+    c.drawString(20*mm, ligne_y, f"Email : {tronquer_texte(data.entreprise.email, 35)}")
+    ligne_y -= 5*mm
     
     # SIRET
-    c.drawString(20*mm, y_text - 25*mm, f"SIRET : {data.entreprise.siret}")
+    c.drawString(20*mm, ligne_y, f"SIRET : {data.entreprise.siret}")
     
     # Bloc client
     c.setFillColor(GRIS_CLAIR)
