@@ -202,7 +202,7 @@ def generer_pdf(data: DevisRequest) -> str:
     
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica", 9)
-    y_text = y_position - 8*mm
+    y_text = y_position - 5*mm
     
   # Nom entreprise
     c.drawString(20*mm, y_text, tronquer_texte(data.entreprise.nom, 40))
