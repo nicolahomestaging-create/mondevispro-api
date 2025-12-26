@@ -207,19 +207,22 @@ def generer_pdf(data: DevisRequest) -> str:
     # Nom entreprise
     c.drawString(20*mm, y_text, tronquer_texte(data.entreprise.nom, 40))
     
-    # Adresse complète sur une ligne (tronquée si trop longue)
-    adresse_complete = formater_adresse_complete(data.entreprise.adresse, data.entreprise.cp_ville)
-    if adresse_complete:
-        c.drawString(20*mm, y_text - 5*mm, tronquer_texte(adresse_complete, 45))
+   # Adresse sur une ligne
+    if data.entreprise.adresse:
+        c.drawString(20*mm, y_text - 5*mm, tronquer_texte(data.entreprise.adresse, 42))
+    
+    # CP + Ville sur une autre ligne
+    if data.entreprise.cp_ville:
+        c.drawString(20*mm, y_text - 10*mm, tronquer_texte(data.entreprise.cp_ville, 42))
     
     # Téléphone
-    c.drawString(20*mm, y_text - 10*mm, f"Tél : {data.entreprise.tel}")
+    c.drawString(20*mm, y_text - 15*mm, f"Tél : {data.entreprise.tel}")
     
     # Email (tronqué si nécessaire)
-    c.drawString(20*mm, y_text - 15*mm, f"Email : {tronquer_texte(data.entreprise.email, 35)}")
+    c.drawString(20*mm, y_text - 20*mm, f"Email : {tronquer_texte(data.entreprise.email, 35)}")
     
     # SIRET
-    c.drawString(20*mm, y_text - 20*mm, f"SIRET : {data.entreprise.siret}")
+    c.drawString(20*mm, y_text - 25*mm, f"SIRET : {data.entreprise.siret}")
     
     # Bloc client
     c.setFillColor(GRIS_CLAIR)
