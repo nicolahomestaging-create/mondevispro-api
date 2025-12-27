@@ -4,3 +4,4 @@ reportlab
 pydantic
 requests
 pillow
+python-docx
