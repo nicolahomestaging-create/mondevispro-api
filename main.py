@@ -1,7 +1,7 @@
 """
 MonDevisPro API
-Génère des devis et factures PDF professionnels
-Version 2.0.0
+Génère des devis et factures PDF + Word professionnels
+Version 3.0.0
 """
 
 from fastapi import FastAPI, HTTPException
@@ -15,19 +15,27 @@ from datetime import datetime, timedelta
 import requests
 from io import BytesIO
 
+# PDF
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 
+# Word
+from docx import Document
+from docx.shared import Inches, Pt, Cm, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import nsdecls
+from docx.oxml import parse_xml
+
 app = FastAPI(
     title="MonDevisPro API",
-    description="API de génération de devis et factures PDF professionnels",
-    version="2.0.0"
+    description="API de génération de devis et factures PDF + Word",
+    version="3.0.0"
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -46,6 +54,7 @@ GRIS_FONCE = HexColor('#2c3e50')
 GRIS_CLAIR = HexColor('#ecf0f1')
 GRIS_TEXTE = HexColor('#555555')
 VERT_FACTURE = HexColor('#27ae60')
+VERT_OLIVE = HexColor('#65a30d')
 
 
 # ==================== MODÈLES ====================
@@ -118,6 +127,17 @@ def telecharger_logo(logo_url: str) -> Optional[ImageReader]:
         print(f"Erreur téléchargement logo: {e}")
     return None
 
+def telecharger_logo_bytes(logo_url: str) -> Optional[BytesIO]:
+    """Télécharge le logo et retourne les bytes pour Word"""
+    try:
+        if not logo_url or logo_url.strip() == "":
+            return None
+        response = requests.get(logo_url, timeout=10)
+        if response.status_code == 200:
+            return BytesIO(response.content)
+    except Exception as e:
+        print(f"Erreur téléchargement logo: {e}")
+    return None
 
 def tronquer_texte(texte: str, max_chars: int) -> str:
     if not texte:
@@ -125,7 +145,6 @@ def tronquer_texte(texte: str, max_chars: int) -> str:
     if len(texte) <= max_chars:
         return texte
     return texte[:max_chars-3] + "..."
-
 
 def formater_adresse_complete(adresse: str, cp_ville: str) -> str:
     parties = []
@@ -135,6 +154,8 @@ def formater_adresse_complete(adresse: str, cp_ville: str) -> str:
         parties.append(cp_ville.strip())
     return ", ".join(parties) if parties else ""
 
+
+# ==================== GÉNÉRATION PDF ====================
 
 def dessiner_bloc_emetteur(c, width, height, data, y_position):
     c.setFillColor(GRIS_CLAIR)
@@ -323,8 +344,6 @@ def dessiner_pied_page(c, width, data, mention_tva=""):
     c.drawRightString(width - 15*mm, 8*mm, "Généré par MonDevisPro.fr")
 
 
-# ==================== GÉNÉRATION PDF DEVIS ====================
-
 def generer_pdf_devis(data: DevisRequest) -> str:
     numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
     filename = f"{numero_devis}.pdf"
@@ -337,7 +356,6 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # En-tête
     c.setFillColor(BLEU_PRINCIPAL)
     c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
     
@@ -377,7 +395,6 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     y_table = y_position - 50*mm
     y_totaux, total_ht, total_ttc = dessiner_tableau_prestations(c, width, data, y_table, data.tva_taux)
     
-    # Conditions
     y_conditions = y_totaux - 45*mm
     c.setFillColor(GRIS_CLAIR)
     c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
@@ -392,7 +409,6 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.conditions_paiement}")
     c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
     
-    # Signature
     y_signature = y_conditions - 53*mm
     c.setStrokeColor(GRIS_CLAIR)
     c.setLineWidth(1)
@@ -414,10 +430,8 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     dessiner_pied_page(c, width, data, mention_tva)
     c.save()
     
-    return filepath, numero_devis, total_ttc
+    return filepath, numero_devis, total_ht, total_ttc
 
-
-# ==================== GÉNÉRATION PDF FACTURE ====================
 
 def generer_pdf_facture(data: FactureRequest) -> str:
     numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
@@ -431,7 +445,6 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # En-tête VERT pour facture
     c.setFillColor(VERT_FACTURE)
     c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
     
@@ -475,7 +488,6 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     y_table = y_position - 50*mm
     y_totaux, total_ht, total_ttc = dessiner_tableau_prestations(c, width, data, y_table, data.tva_taux)
     
-    # Informations de paiement
     y_paiement = y_totaux - 45*mm
     c.setFillColor(GRIS_CLAIR)
     c.roundRect(15*mm, y_paiement - 30*mm, width - 30*mm, 40*mm, 3*mm, fill=True, stroke=False)
@@ -501,23 +513,389 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     return filepath, numero_facture, total_ht, total_ttc
 
 
+# ==================== GÉNÉRATION WORD ====================
+
+def set_cell_shading(cell, color):
+    """Applique une couleur de fond à une cellule Word"""
+    shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
+    cell._tc.get_or_add_tcPr().append(shading_elm)
+
+def generer_word_devis(data: DevisRequest) -> str:
+    """Génère un devis au format Word"""
+    numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    filename = f"{numero_devis}.docx"
+    filepath = os.path.join(PDF_FOLDER, filename)
+    
+    date_devis = datetime.now().strftime("%d/%m/%Y")
+    date_validite = (datetime.now() + timedelta(days=data.validite_jours)).strftime("%d/%m/%Y")
+    
+    doc = Document()
+    
+    # Marges
+    sections = doc.sections
+    for section in sections:
+        section.top_margin = Cm(1.5)
+        section.bottom_margin = Cm(1.5)
+        section.left_margin = Cm(1.5)
+        section.right_margin = Cm(1.5)
+    
+    # Logo si disponible
+    logo_bytes = telecharger_logo_bytes(data.entreprise.logo_url)
+    if logo_bytes:
+        try:
+            doc.add_picture(logo_bytes, width=Inches(1.2))
+        except:
+            pass
+    
+    # En-tête entreprise
+    titre = doc.add_heading(data.entreprise.nom.upper(), 0)
+    titre.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    for run in titre.runs:
+        run.font.color.rgb = RGBColor(26, 82, 118)
+    
+    if data.entreprise.gerant:
+        p = doc.add_paragraph(f"Gérant : {data.entreprise.gerant}")
+        p.runs[0].font.size = Pt(10)
+    
+    # DEVIS + Numéro
+    doc.add_paragraph()
+    titre_devis = doc.add_heading("DEVIS", 1)
+    titre_devis.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    
+    p = doc.add_paragraph(f"N° {numero_devis}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p = doc.add_paragraph(f"Date : {date_devis}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p = doc.add_paragraph(f"Validité : {date_validite}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    
+    doc.add_paragraph()
+    
+    # Tableau infos émetteur/destinataire
+    table_info = doc.add_table(rows=1, cols=2)
+    table_info.autofit = True
+    
+    # Émetteur
+    cell_emetteur = table_info.rows[0].cells[0]
+    cell_emetteur.text = ""
+    p = cell_emetteur.add_paragraph()
+    run = p.add_run("ÉMETTEUR")
+    run.bold = True
+    run.font.color.rgb = RGBColor(26, 82, 118)
+    cell_emetteur.add_paragraph(data.entreprise.nom)
+    cell_emetteur.add_paragraph(data.entreprise.adresse)
+    if data.entreprise.cp_ville:
+        cell_emetteur.add_paragraph(data.entreprise.cp_ville)
+    cell_emetteur.add_paragraph(f"Tél : {data.entreprise.tel}")
+    cell_emetteur.add_paragraph(f"Email : {data.entreprise.email}")
+    cell_emetteur.add_paragraph(f"SIRET : {data.entreprise.siret}")
+    
+    # Destinataire
+    cell_dest = table_info.rows[0].cells[1]
+    cell_dest.text = ""
+    p = cell_dest.add_paragraph()
+    run = p.add_run("DESTINATAIRE")
+    run.bold = True
+    run.font.color.rgb = RGBColor(26, 82, 118)
+    cell_dest.add_paragraph(data.client.nom)
+    if data.client.adresse:
+        cell_dest.add_paragraph(data.client.adresse)
+    if data.client.cp_ville:
+        cell_dest.add_paragraph(data.client.cp_ville)
+    if data.client.tel:
+        cell_dest.add_paragraph(f"Tél : {data.client.tel}")
+    
+    doc.add_paragraph()
+    
+    # Tableau des prestations
+    table = doc.add_table(rows=1, cols=5)
+    table.style = 'Table Grid'
+    
+    # En-tête
+    header_cells = table.rows[0].cells
+    headers = ['Description', 'Qté', 'Unité', 'P.U. HT', 'Total HT']
+    for i, header in enumerate(headers):
+        header_cells[i].text = header
+        header_cells[i].paragraphs[0].runs[0].bold = True
+        header_cells[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        set_cell_shading(header_cells[i], "1a5276")
+    
+    # Lignes
+    total_ht = 0
+    for prestation in data.prestations:
+        row_cells = table.add_row().cells
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        total_ht += total_ligne
+        
+        row_cells[0].text = prestation.description
+        row_cells[1].text = str(prestation.quantite)
+        row_cells[2].text = prestation.unite
+        row_cells[3].text = f"{prestation.prix_unitaire:.2f} €"
+        row_cells[4].text = f"{total_ligne:.2f} €"
+    
+    doc.add_paragraph()
+    
+    # Totaux
+    montant_tva = total_ht * (data.tva_taux / 100)
+    total_ttc = total_ht + montant_tva
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p.add_run(f"Total HT : {total_ht:.2f} €")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if data.tva_taux > 0:
+        p.add_run(f"TVA ({data.tva_taux}%) : {montant_tva:.2f} €")
+    else:
+        run = p.add_run("TVA non applicable")
+        run.italic = True
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    run = p.add_run(f"TOTAL TTC : {total_ttc:.2f} €")
+    run.bold = True
+    run.font.size = Pt(14)
+    run.font.color.rgb = RGBColor(26, 82, 118)
+    
+    doc.add_paragraph()
+    
+    # Conditions
+    doc.add_heading("CONDITIONS", 2)
+    doc.add_paragraph(f"• Délai de réalisation : {data.delai_realisation}")
+    doc.add_paragraph(f"• Conditions de paiement : {data.conditions_paiement}")
+    doc.add_paragraph(f"• Devis valable jusqu'au : {date_validite}")
+    
+    doc.add_paragraph()
+    
+    # Signature
+    doc.add_paragraph("Bon pour accord")
+    doc.add_paragraph("Date : ________________")
+    doc.add_paragraph("Signature : ________________")
+    
+    # Pied de page
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"{data.entreprise.nom} - SIRET {data.entreprise.siret}")
+    run.font.size = Pt(8)
+    run.font.color.rgb = RGBColor(128, 128, 128)
+    
+    if data.tva_taux == 0:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run("TVA non applicable, article 293 B du Code général des impôts")
+        run.font.size = Pt(8)
+        run.italic = True
+    
+    doc.save(filepath)
+    
+    return filepath, numero_devis, total_ht, total_ttc
+
+
+def generer_word_facture(data: FactureRequest) -> str:
+    """Génère une facture au format Word"""
+    numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    filename = f"{numero_facture}.docx"
+    filepath = os.path.join(PDF_FOLDER, filename)
+    
+    date_facture = datetime.now().strftime("%d/%m/%Y")
+    date_echeance = (datetime.now() + timedelta(days=data.date_echeance_jours)).strftime("%d/%m/%Y")
+    
+    doc = Document()
+    
+    # Marges
+    sections = doc.sections
+    for section in sections:
+        section.top_margin = Cm(1.5)
+        section.bottom_margin = Cm(1.5)
+        section.left_margin = Cm(1.5)
+        section.right_margin = Cm(1.5)
+    
+    # Logo si disponible
+    logo_bytes = telecharger_logo_bytes(data.entreprise.logo_url)
+    if logo_bytes:
+        try:
+            doc.add_picture(logo_bytes, width=Inches(1.2))
+        except:
+            pass
+    
+    # En-tête entreprise
+    titre = doc.add_heading(data.entreprise.nom.upper(), 0)
+    titre.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    for run in titre.runs:
+        run.font.color.rgb = RGBColor(39, 174, 96)  # Vert pour facture
+    
+    if data.entreprise.gerant:
+        p = doc.add_paragraph(f"Gérant : {data.entreprise.gerant}")
+        p.runs[0].font.size = Pt(10)
+    
+    # FACTURE + Numéro
+    doc.add_paragraph()
+    titre_facture = doc.add_heading("FACTURE", 1)
+    titre_facture.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    for run in titre_facture.runs:
+        run.font.color.rgb = RGBColor(39, 174, 96)
+    
+    p = doc.add_paragraph(f"N° {numero_facture}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p = doc.add_paragraph(f"Date : {date_facture}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if data.numero_devis_origine:
+        p = doc.add_paragraph(f"Réf. devis : {data.numero_devis_origine}")
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p = doc.add_paragraph(f"Échéance : {date_echeance}")
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    
+    doc.add_paragraph()
+    
+    # Tableau infos émetteur/destinataire
+    table_info = doc.add_table(rows=1, cols=2)
+    table_info.autofit = True
+    
+    # Émetteur
+    cell_emetteur = table_info.rows[0].cells[0]
+    cell_emetteur.text = ""
+    p = cell_emetteur.add_paragraph()
+    run = p.add_run("ÉMETTEUR")
+    run.bold = True
+    run.font.color.rgb = RGBColor(39, 174, 96)
+    cell_emetteur.add_paragraph(data.entreprise.nom)
+    cell_emetteur.add_paragraph(data.entreprise.adresse)
+    if data.entreprise.cp_ville:
+        cell_emetteur.add_paragraph(data.entreprise.cp_ville)
+    cell_emetteur.add_paragraph(f"Tél : {data.entreprise.tel}")
+    cell_emetteur.add_paragraph(f"Email : {data.entreprise.email}")
+    cell_emetteur.add_paragraph(f"SIRET : {data.entreprise.siret}")
+    
+    # Destinataire
+    cell_dest = table_info.rows[0].cells[1]
+    cell_dest.text = ""
+    p = cell_dest.add_paragraph()
+    run = p.add_run("DESTINATAIRE")
+    run.bold = True
+    run.font.color.rgb = RGBColor(39, 174, 96)
+    cell_dest.add_paragraph(data.client.nom)
+    if data.client.adresse:
+        cell_dest.add_paragraph(data.client.adresse)
+    if data.client.cp_ville:
+        cell_dest.add_paragraph(data.client.cp_ville)
+    if data.client.tel:
+        cell_dest.add_paragraph(f"Tél : {data.client.tel}")
+    if data.client.email:
+        cell_dest.add_paragraph(f"Email : {data.client.email}")
+    
+    doc.add_paragraph()
+    
+    # Tableau des prestations
+    table = doc.add_table(rows=1, cols=5)
+    table.style = 'Table Grid'
+    
+    # En-tête
+    header_cells = table.rows[0].cells
+    headers = ['Description', 'Qté', 'Unité', 'P.U. HT', 'Total HT']
+    for i, header in enumerate(headers):
+        header_cells[i].text = header
+        header_cells[i].paragraphs[0].runs[0].bold = True
+        header_cells[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        set_cell_shading(header_cells[i], "27ae60")
+    
+    # Lignes
+    total_ht = 0
+    for prestation in data.prestations:
+        row_cells = table.add_row().cells
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        total_ht += total_ligne
+        
+        row_cells[0].text = prestation.description
+        row_cells[1].text = str(prestation.quantite)
+        row_cells[2].text = prestation.unite
+        row_cells[3].text = f"{prestation.prix_unitaire:.2f} €"
+        row_cells[4].text = f"{total_ligne:.2f} €"
+    
+    doc.add_paragraph()
+    
+    # Totaux
+    montant_tva = total_ht * (data.tva_taux / 100)
+    total_ttc = total_ht + montant_tva
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p.add_run(f"Total HT : {total_ht:.2f} €")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if data.tva_taux > 0:
+        p.add_run(f"TVA ({data.tva_taux}%) : {montant_tva:.2f} €")
+    else:
+        run = p.add_run("TVA non applicable")
+        run.italic = True
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    run = p.add_run(f"TOTAL TTC : {total_ttc:.2f} €")
+    run.bold = True
+    run.font.size = Pt(14)
+    run.font.color.rgb = RGBColor(39, 174, 96)
+    
+    doc.add_paragraph()
+    
+    # Informations de paiement
+    doc.add_heading("INFORMATIONS DE PAIEMENT", 2)
+    doc.add_paragraph(f"• Date d'échéance : {date_echeance}")
+    doc.add_paragraph("• Mode de paiement : Virement bancaire, chèque ou espèces")
+    doc.add_paragraph("• En cas de retard : pénalité de 3 fois le taux d'intérêt légal")
+    doc.add_paragraph("• Indemnité forfaitaire pour frais de recouvrement : 40€")
+    
+    # Pied de page
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"{data.entreprise.nom} - SIRET {data.entreprise.siret}")
+    run.font.size = Pt(8)
+    run.font.color.rgb = RGBColor(128, 128, 128)
+    
+    if data.tva_taux == 0:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(data.mention_legale_tva or "TVA non applicable, article 293 B du Code général des impôts")
+        run.font.size = Pt(8)
+        run.italic = True
+    
+    doc.save(filepath)
+    
+    return filepath, numero_facture, total_ht, total_ttc
+
+
 # ==================== ROUTES API ====================
 
 @app.get("/")
 def root():
-    return {"message": "MonDevisPro API", "version": "2.0.0", "status": "ok"}
+    return {"message": "MonDevisPro API", "version": "3.0.0", "status": "ok"}
 
 
 @app.post("/generer-devis")
 async def generer_devis_endpoint(data: DevisRequest):
     try:
-        filepath, numero_devis, total_ttc = generer_pdf_devis(data)
+        # Générer PDF
+        filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(data)
+        
+        # Générer Word
+        filepath_word, _, _, _ = generer_word_devis(data)
+        # Renommer le Word pour avoir le même numéro
+        new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis}.docx")
+        if os.path.exists(filepath_word) and filepath_word != new_word_path:
+            os.rename(filepath_word, new_word_path)
+        
         return {
             "success": True,
             "numero_devis": numero_devis,
+            "total_ht": total_ht,
             "total_ttc": total_ttc,
-            "pdf_filename": os.path.basename(filepath),
-            "pdf_url": f"/download/{os.path.basename(filepath)}"
+            "pdf_filename": f"{numero_devis}.pdf",
+            "pdf_url": f"/download/{numero_devis}.pdf",
+            "word_filename": f"{numero_devis}.docx",
+            "word_url": f"/download/{numero_devis}.docx"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -543,13 +921,24 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
             delai_realisation=data.devis_data.delai
         )
         
-        filepath, numero_devis, total_ttc = generer_pdf_devis(full_data)
+        # Générer PDF
+        filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(full_data)
+        
+        # Générer Word
+        filepath_word, _, _, _ = generer_word_devis(full_data)
+        new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis}.docx")
+        if os.path.exists(filepath_word) and filepath_word != new_word_path:
+            os.rename(filepath_word, new_word_path)
+        
         return {
             "success": True,
             "numero_devis": numero_devis,
+            "total_ht": total_ht,
             "total_ttc": total_ttc,
-            "pdf_filename": os.path.basename(filepath),
-            "pdf_url": f"/download/{os.path.basename(filepath)}"
+            "pdf_filename": f"{numero_devis}.pdf",
+            "pdf_url": f"/download/{numero_devis}.pdf",
+            "word_filename": f"{numero_devis}.docx",
+            "word_url": f"/download/{numero_devis}.docx"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -558,25 +947,44 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
 @app.post("/generer-facture")
 async def generer_facture_endpoint(data: FactureRequest):
     try:
-        filepath, numero_facture, total_ht, total_ttc = generer_pdf_facture(data)
+        # Générer PDF
+        filepath_pdf, numero_facture, total_ht, total_ttc = generer_pdf_facture(data)
+        
+        # Générer Word
+        filepath_word, _, _, _ = generer_word_facture(data)
+        new_word_path = os.path.join(PDF_FOLDER, f"{numero_facture}.docx")
+        if os.path.exists(filepath_word) and filepath_word != new_word_path:
+            os.rename(filepath_word, new_word_path)
+        
         return {
             "success": True,
             "numero_facture": numero_facture,
             "total_ht": total_ht,
             "total_ttc": total_ttc,
-            "pdf_filename": os.path.basename(filepath),
-            "pdf_url": f"/download/{os.path.basename(filepath)}"
+            "pdf_filename": f"{numero_facture}.pdf",
+            "pdf_url": f"/download/{numero_facture}.pdf",
+            "word_filename": f"{numero_facture}.docx",
+            "word_url": f"/download/{numero_facture}.docx"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/download/{filename}")
-async def download_pdf(filename: str):
+async def download_file(filename: str):
     filepath = os.path.join(PDF_FOLDER, filename)
     if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="PDF non trouvé")
-    return FileResponse(filepath, media_type="application/pdf", filename=filename)
+        raise HTTPException(status_code=404, detail="Fichier non trouvé")
+    
+    # Déterminer le type MIME
+    if filename.endswith('.pdf'):
+        media_type = "application/pdf"
+    elif filename.endswith('.docx'):
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        media_type = "application/octet-stream"
+    
+    return FileResponse(filepath, media_type=media_type, filename=filename)
 
 
 @app.get("/health")
