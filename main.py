@@ -526,7 +526,7 @@ async def generer_devis_endpoint(data: DevisRequest):
 @app.post("/generer-devis-simple")
 async def generer_devis_simple_endpoint(data: DevisRequestSimple):
     try:
-        tva_taux = data.entreprise.tva_taux or 20.0
+        tva_taux = data.entreprise.tva_taux if data.entreprise.tva_taux is not None else 20.0
         conditions = data.entreprise.conditions_paiement or "30% à la commande, solde à réception"
         
         full_data = DevisRequest(
