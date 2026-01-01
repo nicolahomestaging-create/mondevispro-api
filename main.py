@@ -93,6 +93,8 @@ class DevisRequest(BaseModel):
     conditions_paiement: str = "30% à la commande, solde à réception"
     delai_realisation: str = "À définir"
     validite_jours: int = 30
+    remise_type: Optional[str] = None  # "pourcentage" ou "fixe"
+    remise_valeur: Optional[float] = 0
 
 class DevisDataFromAI(BaseModel):
     client_nom: str
@@ -292,14 +294,24 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
     
-    y_ligne -= 5*mm
+   y_ligne -= 5*mm
     c.setStrokeColor(GRIS_CLAIR)
     c.setLineWidth(1)
     c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
     
     y_totaux = y_ligne - 10*mm
-    montant_tva = total_ht * (tva_taux / 100)
-    total_ttc = total_ht + montant_tva
+    
+    # Calcul de la remise
+    remise = 0
+    if hasattr(data, 'remise_type') and data.remise_type and data.remise_valeur:
+        if data.remise_type == "pourcentage":
+            remise = total_ht * (data.remise_valeur / 100)
+        elif data.remise_type == "fixe":
+            remise = data.remise_valeur
+    
+    total_ht_apres_remise = total_ht - remise
+    montant_tva = total_ht_apres_remise * (tva_taux / 100)
+    total_ttc = total_ht_apres_remise + montant_tva
     
     x_label = 130*mm
     x_value = width - 18*mm
@@ -309,20 +321,35 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     c.drawString(x_label, y_totaux, "Total HT")
     c.drawRightString(x_value, y_totaux, f"{total_ht:.2f} €")
     
+    # Afficher la remise si elle existe
+    y_offset = 6*mm
+    if remise > 0:
+        if hasattr(data, 'remise_type') and data.remise_type == "pourcentage":
+            c.drawString(x_label, y_totaux - y_offset, f"Remise ({data.remise_valeur}%)")
+        else:
+            c.drawString(x_label, y_totaux - y_offset, "Remise")
+        c.setFillColor(HexColor('#e74c3c'))
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 6*mm
+    
     if tva_taux > 0:
-        c.drawString(x_label, y_totaux - 6*mm, f"TVA ({tva_taux}%)")
-        c.drawRightString(x_value, y_totaux - 6*mm, f"{montant_tva:.2f} €")
+        c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
+        y_offset += 6*mm
     else:
         c.setFont("Helvetica-Oblique", 8)
-        c.drawString(x_label, y_totaux - 6*mm, "TVA non applicable")
+        c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+        c.setFont("Helvetica", 10)
+        y_offset += 6*mm
     
     c.setFillColor(BLEU_PRINCIPAL)
-    c.roundRect(x_label - 5*mm, y_totaux - 20*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
+    c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
     
     c.setFillColor(white)
     c.setFont("Helvetica-Bold", 11)
-    c.drawString(x_label, y_totaux - 17*mm, "TOTAL TTC")
-    c.drawRightString(x_value, y_totaux - 17*mm, f"{total_ttc:.2f} €")
+    c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
+    c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
     
     return y_totaux, total_ht, total_ttc
 
