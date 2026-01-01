@@ -305,11 +305,12 @@ y_totaux = y_ligne - 10*mm
     
     # Calcul de la remise
 remise = 0
-    if hasattr(data, 'remise_type') and data.remise_type and data.remise_valeur:
-        if data.remise_type == "pourcentage":
-            remise = total_ht * (data.remise_valeur / 100)
-        elif data.remise_type == "fixe":
-            remise = data.remise_valeur
+
+if hasattr(data, 'remise_type') and data.remise_type and data.remise_valeur:
+    if data.remise_type == "pourcentage":
+        remise = total_ht * (data.remise_valeur / 100)
+    elif data.remise_type == "montant":
+        remise = data.remise_valeur
     
     total_ht_apres_remise = total_ht - remise
     montant_tva = total_ht_apres_remise * (tva_taux / 100)
