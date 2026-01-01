@@ -104,6 +104,11 @@ class DevisRequestSimple(BaseModel):
     devis_data: DevisDataFromAI
     validite_jours: int = 30
 
+class RIB(BaseModel):
+    iban: Optional[str] = ""
+    bic: Optional[str] = ""
+    titulaire: Optional[str] = ""
+    
 class FactureRequest(BaseModel):
     entreprise: Entreprise
     client: Client
@@ -112,6 +117,7 @@ class FactureRequest(BaseModel):
     numero_devis_origine: Optional[str] = None
     date_echeance_jours: int = 30
     mention_legale_tva: Optional[str] = ""
+    rib: Optional[RIB] = None
 
 
 # ==================== FONCTIONS UTILITAIRES ====================
@@ -503,6 +509,23 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     c.drawString(20*mm, y_paiement - 14*mm, "• Mode de paiement : Virement bancaire, chèque ou espèces")
     c.drawString(20*mm, y_paiement - 20*mm, "• En cas de retard : pénalité de 3 fois le taux d'intérêt légal")
     c.drawString(20*mm, y_paiement - 26*mm, "• Indemnité forfaitaire pour frais de recouvrement : 40€")
+    
+    # Afficher le RIB si disponible
+    if data.rib and data.rib.iban:
+        y_rib = y_paiement - 45*mm
+        c.setFillColor(GRIS_CLAIR)
+        c.roundRect(15*mm, y_rib - 20*mm, width - 30*mm, 30*mm, 3*mm, fill=True, stroke=False)
+        
+        c.setFillColor(VERT_FACTURE)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(20*mm, y_rib + 2*mm, "COORDONNÉES BANCAIRES")
+        
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 9)
+        c.drawString(20*mm, y_rib - 6*mm, f"IBAN : {data.rib.iban}")
+        c.drawString(20*mm, y_rib - 12*mm, f"BIC : {data.rib.bic}")
+        if data.rib.titulaire:
+            c.drawString(20*mm, y_rib - 18*mm, f"Titulaire : {data.rib.titulaire}")
     
     mention_tva = ""
     if data.tva_taux == 0:
