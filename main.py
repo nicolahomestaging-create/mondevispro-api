@@ -302,18 +302,18 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
 
     y_totaux = y_ligne - 10*mm  # ✅ Indentation corrigée
     
-    # Calcul de la remise
-    remise = 0  # ✅ Indentation corrigée
+       # Calcul de la remise
+    remise = 0
 
-    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur:  # ✅ Indentation corrigée
+    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
         if data.remise_type == "pourcentage":
             remise = total_ht * (data.remise_valeur / 100)
-        elif data.remise_type == "montant":  # Note: votre modèle dit "fixe" mais le code vérifie "montant"
+        elif data.remise_type == "montant":
             remise = data.remise_valeur
     
-    total_ht_apres_remise = total_ht - remise  # ✅ Indentation corrigée
-    montant_tva = total_ht_apres_remise * (tva_taux / 100)  # ✅ Indentation corrigée
-    total_ttc = total_ht_apres_remise + montant_tva  # ✅ Indentation corrigée
+    total_ht_apres_remise = total_ht - remise
+    montant_tva = total_ht_apres_remise * (tva_taux / 100)
+    total_ttc = total_ht_apres_remise + montant_tva
     
     x_label = 130*mm
     x_value = width - 18*mm
@@ -352,7 +352,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
     c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
     
-    return y_totaux, total_ht, total_ttc  # ✅ AJOUT DU RETURN MANQUANT
+    return y_totaux, total_ht, total_ttc
     
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
