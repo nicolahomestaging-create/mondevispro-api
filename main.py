@@ -277,7 +277,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     y_ligne = y_table - 2*mm
     total_ht = 0
     
-    for i, prestation in enumerate(data.prestations):
+  for i, prestation in enumerate(data.prestations):
         y_ligne -= 10*mm
         total_ligne = prestation.quantite * prestation.prix_unitaire
         total_ht += total_ligne
@@ -293,8 +293,8 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawString(120*mm, y_ligne + 2*mm, prestation.unite)
         c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
-
-y_ligne -= 5*mm
+    
+    y_ligne -= 5*mm
     c.setStrokeColor(GRIS_CLAIR)
     c.setLineWidth(1)
     c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
@@ -315,7 +315,6 @@ y_ligne -= 5*mm
     
     x_label = 130*mm
     x_value = width - 18*mm
-    
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica", 10)
     c.drawString(x_label, y_totaux, "Total HT")
