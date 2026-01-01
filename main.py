@@ -120,6 +120,8 @@ class FactureRequest(BaseModel):
     date_echeance_jours: int = 30
     mention_legale_tva: Optional[str] = ""
     rib: Optional[RIB] = None
+    remise_type: Optional[str] = None  # "pourcentage" ou "montant"
+    remise_valeur: Optional[float] = 0
 
 
 # ==================== FONCTIONS UTILITAIRES ====================
