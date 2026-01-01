@@ -277,7 +277,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     y_ligne = y_table - 2*mm
     total_ht = 0
     
-for i, prestation in enumerate(data.prestations):
+    for i, prestation in enumerate(data.prestations):  # ✅ Ajout de l'indentation (4 espaces)
         y_ligne -= 10*mm
         total_ligne = prestation.quantite * prestation.prix_unitaire
         total_ht += total_ligne
@@ -294,27 +294,26 @@ for i, prestation in enumerate(data.prestations):
         c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
 
-y_ligne -= 5*mm
+    y_ligne -= 5*mm  # ✅ Indentation corrigée (4 espaces)
 
-c.setStrokeColor(GRIS_CLAIR)
-c.setLineWidth(1)
-c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+    c.setStrokeColor(GRIS_CLAIR)  # ✅ Indentation corrigée
+    c.setLineWidth(1)  # ✅ Indentation corrigée
+    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)  # ✅ Indentation corrigée
 
-y_totaux = y_ligne - 10*mm
-    
+    y_totaux = y_ligne - 10*mm  # ✅ Indentation corrigée
     
     # Calcul de la remise
-remise = 0
+    remise = 0  # ✅ Indentation corrigée
 
-if hasattr(data, 'remise_type') and data.remise_type and data.remise_valeur:
-    if data.remise_type == "pourcentage":
-        remise = total_ht * (data.remise_valeur / 100)
-    elif data.remise_type == "montant":
-        remise = data.remise_valeur
+    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur:  # ✅ Indentation corrigée
+        if data.remise_type == "pourcentage":
+            remise = total_ht * (data.remise_valeur / 100)
+        elif data.remise_type == "montant":  # Note: votre modèle dit "fixe" mais le code vérifie "montant"
+            remise = data.remise_valeur
     
-    total_ht_apres_remise = total_ht - remise
-    montant_tva = total_ht_apres_remise * (tva_taux / 100)
-    total_ttc = total_ht_apres_remise + montant_tva
+    total_ht_apres_remise = total_ht - remise  # ✅ Indentation corrigée
+    montant_tva = total_ht_apres_remise * (tva_taux / 100)  # ✅ Indentation corrigée
+    total_ttc = total_ht_apres_remise + montant_tva  # ✅ Indentation corrigée
     
     x_label = 130*mm
     x_value = width - 18*mm
@@ -352,6 +351,8 @@ if hasattr(data, 'remise_type') and data.remise_type and data.remise_valeur:
     c.setFont("Helvetica-Bold", 11)
     c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
     c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
+    
+    return y_totaux, total_ht, total_ttc  # ✅ AJOUT DU RETURN MANQUANT
     
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
