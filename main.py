@@ -277,7 +277,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     y_ligne = y_table - 2*mm
     total_ht = 0
     
-  for i, prestation in enumerate(data.prestations):
+for i, prestation in enumerate(data.prestations):
         y_ligne -= 10*mm
         total_ligne = prestation.quantite * prestation.prix_unitaire
         total_ht += total_ligne
