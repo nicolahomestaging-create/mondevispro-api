@@ -986,22 +986,22 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         tva_taux = data.entreprise.tva_taux if data.entreprise.tva_taux is not None else 20.0
         conditions = data.entreprise.conditions_paiement or "30% à la commande, solde à réception"
         
-       full_data = DevisRequest(
-    entreprise=data.entreprise,
-    client=Client(
-        nom=data.devis_data.client_nom,
-        adresse="",
-        cp_ville="",
-        tel=""
-    ),
-    prestations=data.devis_data.prestations,
-    tva_taux=tva_taux,
-    conditions_paiement=conditions,
-    delai_realisation=data.devis_data.delai,
-    validite_jours=data.validite_jours,
-    remise_type=data.devis_data.remise_type,
-    remise_valeur=data.devis_data.remise_valeur or 0
-)
+        full_data = DevisRequest(
+            entreprise=data.entreprise,
+            client=Client(
+                nom=data.devis_data.client_nom,
+                adresse="",
+                cp_ville="",
+                tel=""
+            ),
+            prestations=data.devis_data.prestations,
+            tva_taux=tva_taux,
+            conditions_paiement=conditions,
+            delai_realisation=data.devis_data.delai,
+            validite_jours=data.validite_jours,
+            remise_type=data.devis_data.remise_type,
+            remise_valeur=data.devis_data.remise_valeur or 0
+        )
         
         # Générer PDF
         filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(full_data)
