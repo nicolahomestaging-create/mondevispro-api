@@ -293,13 +293,15 @@ for i, prestation in enumerate(data.prestations):
         c.drawString(120*mm, y_ligne + 2*mm, prestation.unite)
         c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+
+y_ligne -= 5*mm
+
+c.setStrokeColor(GRIS_CLAIR)
+c.setLineWidth(1)
+c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+
+y_totaux = y_ligne - 10*mm
     
-    y_ligne -= 5*mm
-    c.setStrokeColor(GRIS_CLAIR)
-    c.setLineWidth(1)
-    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
-    
-    y_totaux = y_ligne - 10*mm
     
     # Calcul de la remise
     remise = 0
