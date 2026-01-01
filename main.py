@@ -353,8 +353,6 @@ if hasattr(data, 'remise_type') and data.remise_type and data.remise_valeur:
     c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
     c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
     
-    return y_totaux, total_ht, total_ttc
-
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
     c.setStrokeColor(BLEU_PRINCIPAL)
