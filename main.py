@@ -99,7 +99,9 @@ class DevisRequest(BaseModel):
 class DevisDataFromAI(BaseModel):
     client_nom: str
     prestations: List[Prestation]
-    delai: str = "À définir"
+    delai: Optional[str] = "À définir"
+    remise_type: Optional[str] = None
+    remise_valeur: Optional[float] = 0
 
 class DevisRequestSimple(BaseModel):
     entreprise: Entreprise
