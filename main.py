@@ -48,13 +48,13 @@ PDF_FOLDER = "generated_pdfs"
 os.makedirs(PDF_FOLDER, exist_ok=True)
 
 # Couleurs
-BLEU_PRINCIPAL = HexColor('#1a5276')
+BLEU_PRINCIPAL = HexColor('#0d7377')
 BLEU_CLAIR = HexColor('#3498db')
 GRIS_FONCE = HexColor('#2c3e50')
 GRIS_CLAIR = HexColor('#ecf0f1')
 GRIS_TEXTE = HexColor('#555555')
-VERT_FACTURE = HexColor('#27ae60')
-VERT_OLIVE = HexColor('#65a30d')
+VERT_FACTURE = HexColor('#0d7377')
+VERT_OLIVE = HexColor('#0d7377')
 
 
 # ==================== MODÈLES ====================
