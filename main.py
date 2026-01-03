@@ -506,7 +506,7 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica", 9)
     c.drawString(20*mm, y_conditions - 8*mm, f"• Délai de réalisation : {data.delai_realisation}")
-    c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.conditions_paiement}")
+    c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
     c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
     
     y_signature = y_conditions - 53*mm
@@ -780,7 +780,7 @@ def generer_word_devis(data: DevisRequest) -> str:
     # Conditions
     doc.add_heading("CONDITIONS", 2)
     doc.add_paragraph(f"• Délai de réalisation : {data.delai_realisation}")
-    doc.add_paragraph(f"• Conditions de paiement : {data.conditions_paiement}")
+    doc.add_paragraph(f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
     doc.add_paragraph(f"• Devis valable jusqu'au : {date_validite}")
     
     doc.add_paragraph()
