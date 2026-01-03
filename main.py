@@ -1090,16 +1090,16 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(full_data)
         
         # Générer Word
-        filepath_word, _, _, _ = generer_word_devis(full_data)
+     filepath_word, _, _, _ = generer_word_devis(full_data)
         new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis}.docx")
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
-
-    # Upload sur Supabase Storage
+        
+        # Upload sur Supabase Storage
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
         word_url = upload_to_supabase(new_word_path, f"{numero_devis}.docx")
-
-     return {
+        
+        return {
             "success": True,
             "numero_devis": numero_devis,
             "total_ht": total_ht,
@@ -1111,7 +1111,6 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/generer-facture")
 async def generer_facture_endpoint(data: FactureRequest):
