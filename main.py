@@ -49,8 +49,28 @@ app.add_middleware(
 PDF_FOLDER = "generated_pdfs"
 os.makedirs(PDF_FOLDER, exist_ok=True)
 # Configuration Supabase Storage
+# Configuration Supabase Storage
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+
+print(f"=== SUPABASE CONFIG ===")
+print(f"URL: {SUPABASE_URL[:30] if SUPABASE_URL else 'VIDE'}...")
+print(f"KEY: {SUPABASE_SERVICE_KEY[:20] if SUPABASE_SERVICE_KEY else 'VIDE'}...")
+print(f"=======================")
+
+supabase_client: Client = None
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    print("✅ Supabase client créé")
+else:
+    print("❌ Supabase non configuré - variables manquantes")
+
+supabase_client: Client = None
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    print("✅ Supabase client créé")
+else:
+    print("❌ Supabase non configuré - variables manquantes")
 
 supabase_client: Client = None
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
