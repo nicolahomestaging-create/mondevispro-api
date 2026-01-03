@@ -1086,11 +1086,11 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
             remise_valeur=data.devis_data.remise_valeur or 0
         )
         
-        # Générer PDF
+    # Générer PDF
         filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(full_data)
         
         # Générer Word
-     filepath_word, _, _, _ = generer_word_devis(full_data)
+        filepath_word, _, _, _ = generer_word_devis(full_data)
         new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis}.docx")
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
