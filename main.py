@@ -50,12 +50,34 @@ PDF_FOLDER = "generated_pdfs"
 os.makedirs(PDF_FOLDER, exist_ok=True)
 
 # Configuration Supabase Storage
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+# Essayer plusieurs noms de variables possibles (Railway peut utiliser différents préfixes)
+SUPABASE_URL = (
+    os.getenv("SUPABASE_URL") or 
+    os.getenv("RAILWAY_SUPABASE_URL") or
+    os.getenv("DATABASE_URL") or  # Parfois Railway utilise DATABASE_URL
+    ""
+)
+SUPABASE_SERVICE_KEY = (
+    os.getenv("SUPABASE_SERVICE_KEY") or 
+    os.getenv("RAILWAY_SUPABASE_SERVICE_KEY") or
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY") or
+    ""
+)
+
+# Debug: Afficher TOUTES les variables d'environnement qui contiennent "SUPABASE"
+print("=== DEBUG ENV VARIABLES ===")
+all_env = {k: v[:20] + "..." if v and len(v) > 20 else v for k, v in os.environ.items() if "SUPABASE" in k.upper() or "DATABASE" in k.upper()}
+for key, value in all_env.items():
+    print(f"{key}: {value}")
+print("==========================")
 
 print(f"=== SUPABASE CONFIG ===")
-print(f"URL: {SUPABASE_URL[:30] if SUPABASE_URL else 'VIDE'}...")
-print(f"KEY: {SUPABASE_SERVICE_KEY[:20] if SUPABASE_SERVICE_KEY else 'VIDE'}...")
+print(f"SUPABASE_URL (env): {'OUI' if os.getenv('SUPABASE_URL') else 'NON'}")
+print(f"SUPABASE_SERVICE_KEY (env): {'OUI' if os.getenv('SUPABASE_SERVICE_KEY') else 'NON'}")
+print(f"URL finale: {SUPABASE_URL[:50] if SUPABASE_URL else 'VIDE'}...")
+print(f"KEY finale: {SUPABASE_SERVICE_KEY[:20] if SUPABASE_SERVICE_KEY else 'VIDE'}...")
+print(f"Longueur URL: {len(SUPABASE_URL) if SUPABASE_URL else 0}")
+print(f"Longueur KEY: {len(SUPABASE_SERVICE_KEY) if SUPABASE_SERVICE_KEY else 0}")
 print(f"=======================")
 
 # Initialiser le client Supabase UNE SEULE FOIS
