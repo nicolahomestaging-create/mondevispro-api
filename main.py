@@ -29,6 +29,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
+# Supabase Storage
+from supabase import create_client, Client
 
 app = FastAPI(
     title="MonDevisPro API",
@@ -46,6 +48,46 @@ app.add_middleware(
 
 PDF_FOLDER = "generated_pdfs"
 os.makedirs(PDF_FOLDER, exist_ok=True)
+# Configuration Supabase Storage
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+
+supabase_client: Client = None
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+def upload_to_supabase(filepath: str, filename: str) -> str:
+    """Upload un fichier sur Supabase Storage et retourne l'URL publique"""
+    if not supabase_client:
+        print("Supabase non configuré, fichier local conservé")
+        return f"/download/{filename}"
+    
+    try:
+        with open(filepath, 'rb') as f:
+            file_data = f.read()
+        
+        # Déterminer le content-type
+        content_type = "application/pdf" if filename.endswith('.pdf') else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        
+        # Upload sur Supabase Storage
+        supabase_client.storage.from_('documents').upload(
+            path=filename,
+            file=file_data,
+            file_options={"content-type": content_type}
+        )
+        
+        # Générer l'URL publique
+        public_url = supabase_client.storage.from_('documents').get_public_url(filename)
+        
+        # Supprimer le fichier local
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        
+        print(f"✅ Uploadé sur Supabase: {filename}")
+        return public_url
+    except Exception as e:
+        print(f"❌ Erreur upload Supabase: {e}")
+        return f"/download/{filename}"
 
 # Couleurs
 BLEU_PRINCIPAL = HexColor('#0d7377')
@@ -1004,15 +1046,19 @@ async def generer_devis_endpoint(data: DevisRequest):
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
         
+        # Upload sur Supabase Storage
+        pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
+        word_url = upload_to_supabase(new_word_path, f"{numero_devis}.docx")
+        
         return {
             "success": True,
             "numero_devis": numero_devis,
             "total_ht": total_ht,
             "total_ttc": total_ttc,
             "pdf_filename": f"{numero_devis}.pdf",
-            "pdf_url": f"/download/{numero_devis}.pdf",
+            "pdf_url": pdf_url,
             "word_filename": f"{numero_devis}.docx",
-            "word_url": f"/download/{numero_devis}.docx"
+            "word_url": word_url
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1048,16 +1094,20 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis}.docx")
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
-        
-        return {
+
+    # Upload sur Supabase Storage
+        pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
+        word_url = upload_to_supabase(new_word_path, f"{numero_devis}.docx")
+
+     return {
             "success": True,
             "numero_devis": numero_devis,
             "total_ht": total_ht,
             "total_ttc": total_ttc,
             "pdf_filename": f"{numero_devis}.pdf",
-            "pdf_url": f"/download/{numero_devis}.pdf",
+            "pdf_url": pdf_url,
             "word_filename": f"{numero_devis}.docx",
-            "word_url": f"/download/{numero_devis}.docx"
+            "word_url": word_url
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1075,15 +1125,19 @@ async def generer_facture_endpoint(data: FactureRequest):
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
         
+       # Upload sur Supabase Storage
+        pdf_url = upload_to_supabase(filepath_pdf, f"{numero_facture}.pdf")
+        word_url = upload_to_supabase(new_word_path, f"{numero_facture}.docx")
+        
         return {
             "success": True,
             "numero_facture": numero_facture,
             "total_ht": total_ht,
             "total_ttc": total_ttc,
             "pdf_filename": f"{numero_facture}.pdf",
-            "pdf_url": f"/download/{numero_facture}.pdf",
+            "pdf_url": pdf_url,
             "word_filename": f"{numero_facture}.docx",
-            "word_url": f"/download/{numero_facture}.docx"
+            "word_url": word_url
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
