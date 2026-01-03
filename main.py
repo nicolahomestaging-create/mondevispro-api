@@ -70,13 +70,18 @@ class Entreprise(BaseModel):
     gerant: Optional[str] = ""
     siret: str
     adresse: str
-    cp_ville: Optional[str] = ""
+    cp_ville: str
     tel: str
-    email: str
+    email: str = ""
     logo_url: Optional[str] = None
     tva_taux: Optional[float] = 20.0
     mention_legale_tva: Optional[str] = ""
     conditions_paiement: Optional[str] = "30% à la commande, solde à réception"
+    delai_validite: Optional[int] = 30
+    forme_juridique: Optional[str] = "auto-entrepreneur"
+    capital_social: Optional[str] = ""
+    rcs: Optional[str] = ""
+    tva_intracommunautaire: Optional[str] = ""
 
 class Client(BaseModel):
     nom: str
@@ -386,25 +391,57 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
 def dessiner_pied_page(c, width, data, mention_tva=""):
     c.setStrokeColor(BLEU_PRINCIPAL)
     c.setLineWidth(2)
-    c.line(15*mm, 30*mm, width - 15*mm, 30*mm)
+    c.line(15*mm, 35*mm, width - 15*mm, 35*mm)
     
     c.setFillColor(GRIS_TEXTE)
     c.setFont("Helvetica", 7)
     
+    # Récupérer les infos de forme juridique
+    forme = getattr(data.entreprise, 'forme_juridique', 'auto-entrepreneur') or 'auto-entrepreneur'
+    capital = getattr(data.entreprise, 'capital_social', '') or ''
+    rcs = getattr(data.entreprise, 'rcs', '') or ''
+    tva_intra = getattr(data.entreprise, 'tva_intracommunautaire', '') or ''
+    
+    # Ligne 1 : Nom + forme juridique + capital (si applicable)
+    if forme in ['sarl', 'eurl', 'sas', 'sasu', 'SARL', 'EURL', 'SAS', 'SASU']:
+        ligne1 = f"{data.entreprise.nom} - {forme.upper()}"
+        if capital:
+            ligne1 += f" au capital de {capital} €"
+    elif forme in ['ei', 'EI']:
+        ligne1 = f"{data.entreprise.nom} - Entreprise Individuelle"
+    elif forme in ['auto-entrepreneur', 'micro-entreprise', 'Auto-entrepreneur', 'Micro-entreprise']:
+        ligne1 = f"{data.entreprise.nom} - Auto-entrepreneur"
+    else:
+        ligne1 = f"{data.entreprise.nom}"
+    
+    c.drawCentredString(width/2, 28*mm, ligne1)
+    
+    # Ligne 2 : SIRET + RCS (si applicable)
+    ligne2 = f"SIRET : {data.entreprise.siret}"
+    if rcs and forme in ['sarl', 'eurl', 'sas', 'sasu', 'SARL', 'EURL', 'SAS', 'SASU']:
+        ligne2 += f" - {rcs}"
+    elif forme in ['auto-entrepreneur', 'micro-entreprise', 'Auto-entrepreneur', 'Micro-entreprise']:
+        ligne2 += " - Dispensé d'immatriculation au RCS"
+    
+    c.drawCentredString(width/2, 23*mm, ligne2)
+    
+    # Ligne 3 : Adresse + Tél
     adresse_pied = formater_adresse_complete(data.entreprise.adresse, data.entreprise.cp_ville)
-    c.drawCentredString(width/2, 23*mm, f"{data.entreprise.nom} - SIRET {data.entreprise.siret}")
     c.drawCentredString(width/2, 18*mm, f"{adresse_pied} - Tél : {data.entreprise.tel}")
     
+    # Ligne 4 : TVA
     if mention_tva:
         c.setFont("Helvetica-Oblique", 7)
         c.drawCentredString(width/2, 13*mm, mention_tva)
+    elif tva_intra:
+        c.drawCentredString(width/2, 13*mm, f"N° TVA intracommunautaire : {tva_intra}")
     else:
         siret_clean = data.entreprise.siret.replace(' ', '').replace('.', '')
         c.drawCentredString(width/2, 13*mm, f"TVA intracommunautaire : FR{siret_clean[:9] if len(siret_clean) >= 9 else siret_clean}")
     
     c.setFillColor(BLEU_CLAIR)
     c.setFont("Helvetica-Oblique", 6)
-    c.drawRightString(width - 15*mm, 8*mm, "Généré par MonDevisPro.fr")
+    c.drawRightString(width - 15*mm, 8*mm, "Généré par Vocario.fr")
 
 
 def generer_pdf_devis(data: DevisRequest) -> str:
