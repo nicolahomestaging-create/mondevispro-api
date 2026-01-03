@@ -93,6 +93,9 @@ def upload_to_supabase(filepath: str, filename: str) -> str:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Le fichier {filepath} n'existe pas")
         
+        file_size = os.path.getsize(filepath)
+        print(f"📁 Taille du fichier {filename}: {file_size} bytes")
+        
         # Lire le fichier
         with open(filepath, 'rb') as f:
             file_data = f.read()
@@ -100,48 +103,54 @@ def upload_to_supabase(filepath: str, filename: str) -> str:
         if len(file_data) == 0:
             raise ValueError(f"Le fichier {filename} est vide")
         
+        print(f"📤 Début upload de {filename} ({len(file_data)} bytes)")
+        
         # Déterminer le content-type
         content_type = "application/pdf" if filename.endswith('.pdf') else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         
-        # Supprimer le fichier existant s'il y en a un (pour éviter les erreurs)
+        # Essayer de supprimer le fichier existant d'abord
         try:
-            supabase_client.storage.from_('documents').remove([filename])
-            print(f"🗑️  Fichier existant supprimé: {filename}")
+            result = supabase_client.storage.from_('documents').remove([filename])
+            print(f"🗑️  Tentative de suppression du fichier existant: {result}")
         except Exception as e:
-            # Ignorer l'erreur si le fichier n'existe pas
-            pass
+            print(f"ℹ️  Fichier n'existe pas encore (normal): {e}")
         
-        # Upload sur Supabase Storage avec upsert (remplace si existe)
-        response = supabase_client.storage.from_('documents').upload(
+        # Upload sur Supabase Storage
+        # La bibliothèque supabase-py attend file_data directement, pas file_options avec upsert
+        upload_response = supabase_client.storage.from_('documents').upload(
             path=filename,
             file=file_data,
-            file_options={
-                "content-type": content_type,
-                "upsert": "true"  # Remplace le fichier s'il existe déjà
-            }
+            file_options={"content-type": content_type}
         )
         
+        print(f"📥 Réponse upload: {upload_response}")
+        print(f"📥 Type de réponse: {type(upload_response)}")
+        
         # Vérifier que l'upload a réussi
-        if not response:
-            raise Exception("Réponse vide de Supabase Storage")
+        # La réponse peut être un dict avec 'error' ou une liste
+        if isinstance(upload_response, dict) and upload_response.get('error'):
+            error_msg = upload_response.get('error', 'Erreur inconnue')
+            raise Exception(f"Erreur upload Supabase: {error_msg}")
+        
+        print(f"✅ Upload réussi pour {filename}")
         
         # Générer l'URL publique
-        public_url_response = supabase_client.storage.from_('documents').get_public_url(filename)
+        # get_public_url retourne directement une chaîne d'URL
+        public_url = supabase_client.storage.from_('documents').get_public_url(filename)
         
-        if not public_url_response:
-            raise Exception("Impossible de générer l'URL publique")
+        print(f"🔗 Type URL publique: {type(public_url)}")
+        print(f"🔗 URL publique brute: {public_url}")
         
-        # Extraire l'URL de la réponse
-        if isinstance(public_url_response, dict):
-            public_url = public_url_response.get('publicUrl', '')
-        elif isinstance(public_url_response, str):
-            public_url = public_url_response
-        else:
-            # Si c'est un objet avec un attribut
-            public_url = getattr(public_url_response, 'publicUrl', str(public_url_response))
+        # Convertir en string si nécessaire
+        if isinstance(public_url, dict):
+            public_url = public_url.get('publicUrl', '') or public_url.get('public_url', '')
+        elif not isinstance(public_url, str):
+            public_url = str(public_url)
         
-        if not public_url or public_url == '':
-            raise Exception("URL publique vide")
+        if not public_url or public_url == '' or public_url == 'None':
+            raise Exception(f"URL publique vide ou invalide: {public_url}")
+        
+        print(f"✅ URL publique finale: {public_url}")
         
         # Supprimer le fichier local seulement après confirmation de l'upload
         if os.path.exists(filepath):
@@ -151,7 +160,6 @@ def upload_to_supabase(filepath: str, filename: str) -> str:
             except Exception as e:
                 print(f"⚠️  Impossible de supprimer le fichier local: {e}")
         
-        print(f"✅ Uploadé sur Supabase: {filename} -> {public_url}")
         return public_url
         
     except FileNotFoundError as e:
@@ -161,7 +169,7 @@ def upload_to_supabase(filepath: str, filename: str) -> str:
         print(f"❌ Erreur upload Supabase pour {filename}: {e}")
         print(f"   Type d'erreur: {type(e).__name__}")
         import traceback
-        print(f"   Traceback: {traceback.format_exc()}")
+        traceback.print_exc()
         # Ne pas supprimer le fichier local en cas d'erreur
         return f"/download/{filename}"
 
