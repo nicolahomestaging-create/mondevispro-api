@@ -48,7 +48,7 @@ app.add_middleware(
 
 PDF_FOLDER = "generated_pdfs"
 os.makedirs(PDF_FOLDER, exist_ok=True)
-# Configuration Supabase Storage
+
 # Configuration Supabase Storage
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
@@ -58,55 +58,111 @@ print(f"URL: {SUPABASE_URL[:30] if SUPABASE_URL else 'VIDE'}...")
 print(f"KEY: {SUPABASE_SERVICE_KEY[:20] if SUPABASE_SERVICE_KEY else 'VIDE'}...")
 print(f"=======================")
 
-supabase_client: Client = None
+# Initialiser le client Supabase UNE SEULE FOIS
+supabase_client: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
-    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    print("✅ Supabase client créé")
+    try:
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        print("✅ Supabase client créé")
+        
+        # Vérifier que le bucket 'documents' existe
+        try:
+            buckets = supabase_client.storage.list_buckets()
+            bucket_names = [b.name for b in buckets]
+            if 'documents' not in bucket_names:
+                print("⚠️ ATTENTION: Le bucket 'documents' n'existe pas dans Supabase Storage!")
+                print(f"   Buckets disponibles: {bucket_names}")
+            else:
+                print("✅ Bucket 'documents' trouvé")
+        except Exception as e:
+            print(f"⚠️ Erreur lors de la vérification des buckets: {e}")
+    except Exception as e:
+        print(f"❌ Erreur lors de la création du client Supabase: {e}")
+        supabase_client = None
 else:
-    print("❌ Supabase non configuré - variables manquantes")
-
-supabase_client: Client = None
-if SUPABASE_URL and SUPABASE_SERVICE_KEY:
-    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-    print("✅ Supabase client créé")
-else:
-    print("❌ Supabase non configuré - variables manquantes")
-
-supabase_client: Client = None
-if SUPABASE_URL and SUPABASE_SERVICE_KEY:
-    supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    print("❌ Supabase non configuré - variables d'environnement manquantes")
 
 def upload_to_supabase(filepath: str, filename: str) -> str:
     """Upload un fichier sur Supabase Storage et retourne l'URL publique"""
     if not supabase_client:
-        print("Supabase non configuré, fichier local conservé")
+        print(f"⚠️ Supabase non configuré, fichier local conservé: {filename}")
         return f"/download/{filename}"
     
     try:
+        # Vérifier que le fichier existe
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Le fichier {filepath} n'existe pas")
+        
+        # Lire le fichier
         with open(filepath, 'rb') as f:
             file_data = f.read()
+        
+        if len(file_data) == 0:
+            raise ValueError(f"Le fichier {filename} est vide")
         
         # Déterminer le content-type
         content_type = "application/pdf" if filename.endswith('.pdf') else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         
-        # Upload sur Supabase Storage
-        supabase_client.storage.from_('documents').upload(
+        # Supprimer le fichier existant s'il y en a un (pour éviter les erreurs)
+        try:
+            supabase_client.storage.from_('documents').remove([filename])
+            print(f"🗑️  Fichier existant supprimé: {filename}")
+        except Exception as e:
+            # Ignorer l'erreur si le fichier n'existe pas
+            pass
+        
+        # Upload sur Supabase Storage avec upsert (remplace si existe)
+        response = supabase_client.storage.from_('documents').upload(
             path=filename,
             file=file_data,
-            file_options={"content-type": content_type}
+            file_options={
+                "content-type": content_type,
+                "upsert": "true"  # Remplace le fichier s'il existe déjà
+            }
         )
         
+        # Vérifier que l'upload a réussi
+        if not response:
+            raise Exception("Réponse vide de Supabase Storage")
+        
         # Générer l'URL publique
-        public_url = supabase_client.storage.from_('documents').get_public_url(filename)
+        public_url_response = supabase_client.storage.from_('documents').get_public_url(filename)
         
-        # Supprimer le fichier local
+        if not public_url_response:
+            raise Exception("Impossible de générer l'URL publique")
+        
+        # Extraire l'URL de la réponse
+        if isinstance(public_url_response, dict):
+            public_url = public_url_response.get('publicUrl', '')
+        elif isinstance(public_url_response, str):
+            public_url = public_url_response
+        else:
+            # Si c'est un objet avec un attribut
+            public_url = getattr(public_url_response, 'publicUrl', str(public_url_response))
+        
+        if not public_url or public_url == '':
+            raise Exception("URL publique vide")
+        
+        # Supprimer le fichier local seulement après confirmation de l'upload
         if os.path.exists(filepath):
-            os.remove(filepath)
+            try:
+                os.remove(filepath)
+                print(f"🗑️  Fichier local supprimé: {filepath}")
+            except Exception as e:
+                print(f"⚠️  Impossible de supprimer le fichier local: {e}")
         
-        print(f"✅ Uploadé sur Supabase: {filename}")
+        print(f"✅ Uploadé sur Supabase: {filename} -> {public_url}")
         return public_url
+        
+    except FileNotFoundError as e:
+        print(f"❌ Erreur fichier non trouvé: {e}")
+        return f"/download/{filename}"
     except Exception as e:
-        print(f"❌ Erreur upload Supabase: {e}")
+        print(f"❌ Erreur upload Supabase pour {filename}: {e}")
+        print(f"   Type d'erreur: {type(e).__name__}")
+        import traceback
+        print(f"   Traceback: {traceback.format_exc()}")
+        # Ne pas supprimer le fichier local en cas d'erreur
         return f"/download/{filename}"
 
 # Couleurs
@@ -349,7 +405,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     total_ht_avant_acompte = 0  # Total HT des prestations positives (avant acompte)
     total_acompte = 0  # Total des acomptes (négatifs)
     
-    for i, prestation in enumerate(data.prestations):  # ✅ Ajout de l'indentation (4 espaces)
+    for i, prestation in enumerate(data.prestations):
         y_ligne -= 10*mm
         total_ligne = prestation.quantite * prestation.prix_unitaire
         
@@ -371,13 +427,13 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
 
-    y_ligne -= 5*mm  # ✅ Indentation corrigée (4 espaces)
+    y_ligne -= 5*mm
 
-    c.setStrokeColor(GRIS_CLAIR)  # ✅ Indentation corrigée
-    c.setLineWidth(1)  # ✅ Indentation corrigée
-    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)  # ✅ Indentation corrigée
+    c.setStrokeColor(GRIS_CLAIR)
+    c.setLineWidth(1)
+    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
 
-    y_totaux = y_ligne - 10*mm  # ✅ Indentation corrigée
+    y_totaux = y_ligne - 10*mm
     
     # Calcul de la remise sur le total HT AVANT acompte
     remise = 0
@@ -1081,6 +1137,9 @@ async def generer_devis_endpoint(data: DevisRequest):
             "word_url": word_url
         }
     except Exception as e:
+        print(f"❌ Erreur dans generer_devis_endpoint: {e}")
+        import traceback
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generer-devis-simple")
@@ -1106,7 +1165,7 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
             remise_valeur=data.devis_data.remise_valeur or 0
         )
         
-    # Générer PDF
+        # Générer PDF
         filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(full_data)
         
         # Générer Word
@@ -1130,6 +1189,9 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
             "word_url": word_url
         }
     except Exception as e:
+        print(f"❌ Erreur dans generer_devis_simple_endpoint: {e}")
+        import traceback
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generer-facture")
@@ -1144,7 +1206,7 @@ async def generer_facture_endpoint(data: FactureRequest):
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
         
-       # Upload sur Supabase Storage
+        # Upload sur Supabase Storage
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_facture}.pdf")
         word_url = upload_to_supabase(new_word_path, f"{numero_facture}.docx")
         
@@ -1159,6 +1221,9 @@ async def generer_facture_endpoint(data: FactureRequest):
             "word_url": word_url
         }
     except Exception as e:
+        print(f"❌ Erreur dans generer_facture_endpoint: {e}")
+        import traceback
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
