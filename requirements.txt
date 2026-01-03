@@ -5,3 +5,4 @@ pydantic
 requests
 pillow
 python-docx
+supabase
