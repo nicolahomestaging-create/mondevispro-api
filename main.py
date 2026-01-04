@@ -277,6 +277,7 @@ class FactureRequest(BaseModel):
     rib: Optional[RIB] = None
     remise_type: Optional[str] = None  # "pourcentage" ou "montant"
     remise_valeur: Optional[float] = 0
+    statut: Optional[str] = "en_attente"  # "en_attente", "payee", etc.
 
 
 # ==================== FONCTIONS UTILITAIRES ====================
@@ -916,12 +917,26 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     c.drawRightString(width - 20*mm, height - 18*mm, "FACTURE")
     c.setFont("Helvetica", 11)
     c.drawRightString(width - 20*mm, height - 28*mm, f"N° {numero_facture}")
+    
+    # Vérifier si la facture est payée
+    est_payee = hasattr(data, 'statut') and data.statut == 'payee'
+    
+    if est_payee:
+        # Afficher "PAYÉE" en vert à côté du numéro
+        c.setFillColor(HexColor('#27ae60'))  # Vert pour "PAYÉE"
+        c.setFont("Helvetica-Bold", 12)
+        c.drawRightString(width - 20*mm, height - 36*mm, "PAYÉE")
+        c.setFillColor(white)  # Remettre la couleur blanche pour la suite
+    
     c.setFont("Helvetica", 9)
-    c.drawRightString(width - 20*mm, height - 36*mm, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
+    c.setFillColor(white)
+    y_date = height - 42*mm if est_payee else height - 36*mm
+    c.drawRightString(width - 20*mm, y_date, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
     
     if data.numero_devis_origine:
         c.setFont("Helvetica", 8)
-        c.drawRightString(width - 20*mm, height - 42*mm, f"Réf. devis : {data.numero_devis_origine}")
+        y_ref_devis = y_date - 6*mm
+        c.drawRightString(width - 20*mm, y_ref_devis, f"Réf. devis : {data.numero_devis_origine}")
     
     y_position = height - 60*mm
     dessiner_bloc_emetteur(c, width, height, data, y_position)
@@ -929,7 +944,8 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     
     c.setFillColor(GRIS_TEXTE)
     c.setFont("Helvetica", 9)
-    c.drawRightString(width - 20*mm, y_position - 28*mm, f"Échéance : {date_echeance}")
+    if not est_payee:
+        c.drawRightString(width - 20*mm, y_position - 28*mm, f"Échéance : {date_echeance}")
     
     y_table = y_position - 50*mm
     y_totaux, total_ht, total_ttc = dessiner_tableau_prestations(c, width, data, y_table, data.tva_taux)
@@ -944,10 +960,17 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica", 9)
-    c.drawString(20*mm, y_paiement - 8*mm, f"• Date d'échéance : {date_echeance}")
-    c.drawString(20*mm, y_paiement - 14*mm, "• Mode de paiement : Virement bancaire, chèque ou espèces")
-    c.drawString(20*mm, y_paiement - 20*mm, "• En cas de retard : pénalité de 3 fois le taux d'intérêt légal")
-    c.drawString(20*mm, y_paiement - 26*mm, "• Indemnité forfaitaire pour frais de recouvrement : 40€")
+    
+    if est_payee:
+        # Si la facture est payée, afficher "Reste à payer : 0 €"
+        c.drawString(20*mm, y_paiement - 8*mm, f"• Reste à payer : 0,00 €")
+        c.drawString(20*mm, y_paiement - 14*mm, "• Paiement reçu")
+    else:
+        # Sinon, afficher les informations normales
+        c.drawString(20*mm, y_paiement - 8*mm, f"• Date d'échéance : {date_echeance}")
+        c.drawString(20*mm, y_paiement - 14*mm, "• Mode de paiement : Virement bancaire, chèque ou espèces")
+        c.drawString(20*mm, y_paiement - 20*mm, "• En cas de retard : pénalité de 3 fois le taux d'intérêt légal")
+        c.drawString(20*mm, y_paiement - 26*mm, "• Indemnité forfaitaire pour frais de recouvrement : 40€")
     
     # Afficher le RIB si disponible
     if data.rib and data.rib.iban:
