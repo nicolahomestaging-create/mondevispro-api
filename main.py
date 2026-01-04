@@ -694,63 +694,6 @@ def generer_pdf_devis(data: DevisRequest) -> str:
         if est_derniere_page:
             y_totaux = y_totaux_tableau
             
-            # Vérifier s'il y a assez d'espace pour les conditions AVANT les totaux
-            hauteur_conditions = 35*mm
-            espace_necessaire_conditions = hauteur_conditions + 40*mm  # 40mm marge pour le footer
-            y_conditions_possible = y_totaux - 20*mm  # Conditions remontées juste avant les totaux
-            
-            # Si pas assez d'espace pour les conditions sur cette page, créer une nouvelle page
-            conditions_sur_nouvelle_page = False
-            if y_conditions_possible < espace_necessaire_conditions:
-                # Dessiner le footer sur la page actuelle (sans conditions)
-                dessiner_pied_page(c, width, data, mention_tva)
-                # Créer une nouvelle page pour les conditions
-                c.showPage()
-                dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite)
-                y_conditions = height - 55*mm
-                conditions_sur_nouvelle_page = True
-                
-                # Dessiner les conditions en haut de la nouvelle page
-                c.setFillColor(GRIS_CLAIR)
-                c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
-                
-                c.setFillColor(BLEU_PRINCIPAL)
-                c.setFont("Helvetica-Bold", 10)
-                c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
-                
-                c.setFillColor(GRIS_FONCE)
-                c.setFont("Helvetica", 9)
-                c.drawString(20*mm, y_conditions - 8*mm, f"• Délai de réalisation : {data.delai_realisation}")
-                c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
-                c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
-                
-                # Dessiner le footer sur cette page aussi
-                dessiner_pied_page(c, width, data, mention_tva)
-                
-                # Créer une autre page pour les totaux et signature
-                c.showPage()
-                dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite)
-                y_totaux = height - 55*mm
-            else:
-                # Dessiner les conditions sur la même page, AVANT les totaux
-                y_conditions = y_conditions_possible
-                
-                c.setFillColor(GRIS_CLAIR)
-                c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
-                
-                c.setFillColor(BLEU_PRINCIPAL)
-                c.setFont("Helvetica-Bold", 10)
-                c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
-                
-                c.setFillColor(GRIS_FONCE)
-                c.setFont("Helvetica", 9)
-                c.drawString(20*mm, y_conditions - 8*mm, f"• Délai de réalisation : {data.delai_realisation}")
-                c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
-                c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
-                
-                # Ajuster la position des totaux après les conditions
-                y_totaux = y_conditions - 40*mm
-            
             # Dessiner les totaux
             y_fin_totaux = dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, data.tva_taux, total_ht_final, total_ttc, data)
             
@@ -769,7 +712,40 @@ def generer_pdf_devis(data: DevisRequest) -> str:
             c.setFont("Helvetica-Oblique", 7)
             c.drawString(20*mm, y_signature - 31*mm, "(Précédée de \"Bon pour accord\")")
             
-            # Dessiner le footer sur cette page (avec totaux et signature)
+            # Vérifier s'il y a assez d'espace pour les conditions APRÈS les totaux/signature
+            hauteur_conditions = 35*mm
+            espace_necessaire_conditions = hauteur_conditions + 40*mm  # 40mm marge pour le footer
+            # Position des conditions après la signature (prendre le plus bas entre signature et totaux)
+            y_bas_signature = y_signature - 35*mm
+            y_conditions_possible = min(y_fin_totaux, y_bas_signature) - 45*mm
+            
+            # Si pas assez d'espace pour les conditions sur cette page, créer une nouvelle page
+            if y_conditions_possible < espace_necessaire_conditions:
+                # Dessiner le footer sur la page actuelle (avec totaux et signature)
+                dessiner_pied_page(c, width, data, mention_tva)
+                # Créer une nouvelle page pour les conditions
+                c.showPage()
+                dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite)
+                y_conditions = height - 55*mm
+            else:
+                # Dessiner les conditions sur la même page, APRÈS les totaux/signature
+                y_conditions = y_conditions_possible
+            
+            # Dessiner les conditions
+            c.setFillColor(GRIS_CLAIR)
+            c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
+            
+            c.setFillColor(BLEU_PRINCIPAL)
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
+            
+            c.setFillColor(GRIS_FONCE)
+            c.setFont("Helvetica", 9)
+            c.drawString(20*mm, y_conditions - 8*mm, f"• Délai de réalisation : {data.delai_realisation}")
+            c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
+            c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
+            
+            # Dessiner le footer sur cette page (avec totaux, signature et conditions)
             dessiner_pied_page(c, width, data, mention_tva)
         
         # Dessiner le footer sur chaque page (sauf la dernière page qui l'a déjà dessiné)
