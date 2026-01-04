@@ -419,69 +419,39 @@ def dessiner_bloc_client(c, width, height, data, y_position):
         c.drawString(115*mm, ligne_y, f"Email : {data.client.email}")
 
 
-def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
+def dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite):
+    """Dessine l'en-tête de page (pour la première page et les pages suivantes)"""
     c.setFillColor(BLEU_PRINCIPAL)
-    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
+    c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
+    
+    text_start_x = 15*mm
+    
+    if logo:
+        try:
+            logo_size = 30*mm
+            c.drawImage(logo, 15*mm, height - 40*mm, width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
+            text_start_x = 50*mm
+        except Exception as e:
+            print(f"Erreur logo: {e}")
     
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(18*mm, y_table + 3*mm, "Description")
-    c.drawString(105*mm, y_table + 3*mm, "Qté")
-    c.drawString(120*mm, y_table + 3*mm, "Unité")
-    c.drawString(142*mm, y_table + 3*mm, "P.U. HT")
-    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(text_start_x, height - 18*mm, tronquer_texte(data.entreprise.nom.upper(), 30))
     
-    y_ligne = y_table - 2*mm
-    total_ht_avant_acompte = 0  # Total HT des prestations positives (avant acompte)
-    total_acompte = 0  # Total des acomptes (négatifs)
-    
-    for i, prestation in enumerate(data.prestations):
-        y_ligne -= 10*mm
-        total_ligne = prestation.quantite * prestation.prix_unitaire
-        
-        # Séparer les prestations positives et les acomptes (négatifs)
-        if total_ligne >= 0:
-            total_ht_avant_acompte += total_ligne
-        else:
-            total_acompte += abs(total_ligne)  # Stocker en valeur absolue
-        
-        if i % 2 == 0:
-            c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, 10*mm, fill=True, stroke=False)
-        
-        c.setFillColor(GRIS_FONCE)
+    if data.entreprise.gerant and data.entreprise.gerant.strip():
         c.setFont("Helvetica", 9)
-        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(prestation.description, 50))
-        c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
-        c.drawString(120*mm, y_ligne + 2*mm, prestation.unite)
-        c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+        c.drawString(text_start_x, height - 26*mm, f"Gérant : {data.entreprise.gerant}")
+    
+    c.setFont("Helvetica-Bold", 28)
+    c.drawRightString(width - 20*mm, height - 18*mm, "DEVIS")
+    c.setFont("Helvetica", 11)
+    c.drawRightString(width - 20*mm, height - 28*mm, f"N° {numero_devis}")
+    c.setFont("Helvetica", 9)
+    c.drawRightString(width - 20*mm, height - 36*mm, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
 
-    y_ligne -= 5*mm
 
-    c.setStrokeColor(GRIS_CLAIR)
-    c.setLineWidth(1)
-    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
-
-    y_totaux = y_ligne - 10*mm
-    
-    # Calcul de la remise sur le total HT AVANT acompte
-    remise = 0
-    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
-        if data.remise_type == "pourcentage":
-            remise = total_ht_avant_acompte * (data.remise_valeur / 100)
-        elif data.remise_type == "montant":
-            remise = data.remise_valeur
-    
-    # Appliquer la remise, puis déduire l'acompte
-    total_ht_apres_remise = total_ht_avant_acompte - remise
-    total_ht_final = total_ht_apres_remise - total_acompte
-    montant_tva = total_ht_final * (tva_taux / 100)
-    total_ttc = total_ht_final + montant_tva
-    
-    # Pour l'affichage, utiliser le total HT avant remise et acompte
-    total_ht = total_ht_avant_acompte
-    
+def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, tva_taux, total_ht_final, total_ttc, data):
+    """Dessine les totaux à droite"""
     x_label = 130*mm
     x_value = width - 18*mm
     c.setFillColor(GRIS_FONCE)
@@ -504,6 +474,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     # Afficher "Total HT après remise" si remise ou acompte
     if remise > 0 or total_acompte > 0:
         c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
+        total_ht_apres_remise = total_ht_avant_acompte - remise
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
         y_offset += 6*mm
     
@@ -515,6 +486,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.setFillColor(GRIS_FONCE)
         y_offset += 6*mm
     
+    montant_tva = total_ht_final * (tva_taux / 100)
     if tva_taux > 0:
         c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
         c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
@@ -533,7 +505,59 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
     c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
     
-    return y_totaux, total_ht_final, total_ttc
+    return y_totaux - y_offset - 8*mm  # Retourner la position Y finale
+
+
+def dessiner_lignes_prestations(c, width, prestations, y_table, index_debut=0):
+    """Dessine les lignes de prestations (en-tête + lignes) et retourne la position Y finale et les totaux calculés"""
+    # En-tête du tableau
+    c.setFillColor(BLEU_PRINCIPAL)
+    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
+    
+    c.setFillColor(white)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(18*mm, y_table + 3*mm, "Description")
+    c.drawString(105*mm, y_table + 3*mm, "Qté")
+    c.drawString(120*mm, y_table + 3*mm, "Unité")
+    c.drawString(142*mm, y_table + 3*mm, "P.U. HT")
+    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
+    
+    y_ligne = y_table - 2*mm
+    total_ht_avant_acompte = 0
+    total_acompte = 0
+    
+    # Dessiner les lignes
+    for i, prestation in enumerate(prestations):
+        y_ligne -= 10*mm
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        
+        # Séparer les prestations positives et les acomptes (négatifs)
+        if total_ligne >= 0:
+            total_ht_avant_acompte += total_ligne
+        else:
+            total_acompte += abs(total_ligne)
+        
+        # Alterner les couleurs de fond
+        if (index_debut + i) % 2 == 0:
+            c.setFillColor(HexColor('#f8f9fa'))
+            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, 10*mm, fill=True, stroke=False)
+        
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 9)
+        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(prestation.description, 50))
+        c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
+        c.drawString(120*mm, y_ligne + 2*mm, prestation.unite)
+        c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+    
+    y_ligne -= 5*mm
+    
+    # Ligne de séparation
+    c.setStrokeColor(GRIS_CLAIR)
+    c.setLineWidth(1)
+    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+    
+    return y_ligne - 10*mm, total_ht_avant_acompte, total_acompte
     
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
@@ -604,81 +628,115 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    c.setFillColor(BLEU_PRINCIPAL)
-    c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
+    # Calculer les totaux globaux sur toutes les prestations
+    total_ht_avant_acompte = 0
+    total_acompte = 0
+    for prestation in data.prestations:
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        if total_ligne >= 0:
+            total_ht_avant_acompte += total_ligne
+        else:
+            total_acompte += abs(total_ligne)
     
-    text_start_x = 15*mm
+    # Calcul de la remise
+    remise = 0
+    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
+        if data.remise_type == "pourcentage":
+            remise = total_ht_avant_acompte * (data.remise_valeur / 100)
+        elif data.remise_type == "montant":
+            remise = data.remise_valeur
     
-    if logo:
-        try:
-            logo_size = 30*mm
-            c.drawImage(logo, 15*mm, height - 40*mm, width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
-            text_start_x = 50*mm
-        except Exception as e:
-            print(f"Erreur logo: {e}")
+    # Appliquer la remise, puis déduire l'acompte
+    total_ht_apres_remise = total_ht_avant_acompte - remise
+    total_ht_final = total_ht_apres_remise - total_acompte
+    montant_tva = total_ht_final * (data.tva_taux / 100)
+    total_ttc = total_ht_final + montant_tva
+    total_ht = total_ht_avant_acompte  # Pour l'affichage
     
-    c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(text_start_x, height - 18*mm, tronquer_texte(data.entreprise.nom.upper(), 30))
-    
-    if data.entreprise.gerant and data.entreprise.gerant.strip():
-        c.setFont("Helvetica", 9)
-        c.drawString(text_start_x, height - 26*mm, f"Gérant : {data.entreprise.gerant}")
-    
-    c.setFont("Helvetica-Bold", 28)
-    c.drawRightString(width - 20*mm, height - 18*mm, "DEVIS")
-    c.setFont("Helvetica", 11)
-    c.drawRightString(width - 20*mm, height - 28*mm, f"N° {numero_devis}")
-    c.setFont("Helvetica", 9)
-    c.drawRightString(width - 20*mm, height - 36*mm, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
-    
-    y_position = height - 60*mm
-    dessiner_bloc_emetteur(c, width, height, data, y_position)
-    dessiner_bloc_client(c, width, height, data, y_position)
-    
-    c.setFillColor(GRIS_TEXTE)
-    c.setFont("Helvetica", 9)
-    c.drawRightString(width - 20*mm, y_position - 28*mm, f"Validité : {date_validite}")
-    
-    y_table = y_position - 50*mm
-    y_totaux, total_ht, total_ttc = dessiner_tableau_prestations(c, width, data, y_table, data.tva_taux)
-    
-    y_conditions = y_totaux - 45*mm
-    c.setFillColor(GRIS_CLAIR)
-    c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
-    
-    c.setFillColor(BLEU_PRINCIPAL)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
-    
-    c.setFillColor(GRIS_FONCE)
-    c.setFont("Helvetica", 9)
-    c.drawString(20*mm, y_conditions - 8*mm, f"• Délai de réalisation : {data.delai_realisation}")
-    c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
-    c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
-    
-    y_signature = y_conditions - 53*mm
-    c.setStrokeColor(GRIS_CLAIR)
-    c.setLineWidth(1)
-    c.roundRect(110*mm, y_signature - 10*mm, 80*mm, 40*mm, 3*mm, fill=False, stroke=True)
-    
-    c.setFillColor(GRIS_TEXTE)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(115*mm, y_signature + 22*mm, "Bon pour accord")
-    c.setFont("Helvetica", 8)
-    c.drawString(115*mm, y_signature + 12*mm, "Date :")
-    c.drawString(115*mm, y_signature + 2*mm, "Signature :")
-    c.setFont("Helvetica-Oblique", 7)
-    c.drawString(115*mm, y_signature - 5*mm, "(Précédée de \"Bon pour accord\")")
+    # Pagination : diviser les prestations en groupes
+    lignes_par_page = 11  # Nombre de lignes par page
+    prestations_groupes = []
+    for i in range(0, len(data.prestations), lignes_par_page):
+        prestations_groupes.append(data.prestations[i:i + lignes_par_page])
     
     mention_tva = ""
     if data.tva_taux == 0:
         mention_tva = "TVA non applicable, article 293 B du Code général des impôts"
     
-    dessiner_pied_page(c, width, data, mention_tva)
+    # Dessiner chaque groupe de prestations
+    for page_num, groupe_prestations in enumerate(prestations_groupes):
+        est_premiere_page = (page_num == 0)
+        est_derniere_page = (page_num == len(prestations_groupes) - 1)
+        
+        # Dessiner l'en-tête de page
+        dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite)
+        
+        if est_premiere_page:
+            # Dessiner les blocs emetteur/client sur la première page uniquement
+            y_position = height - 60*mm
+            dessiner_bloc_emetteur(c, width, height, data, y_position)
+            dessiner_bloc_client(c, width, height, data, y_position)
+            
+            c.setFillColor(GRIS_TEXTE)
+            c.setFont("Helvetica", 9)
+            c.drawRightString(width - 20*mm, y_position - 28*mm, f"Validité : {date_validite}")
+            
+            y_table = y_position - 50*mm
+        else:
+            # Sur les pages suivantes, le tableau commence plus haut
+            y_table = height - 55*mm
+        
+        # Dessiner les lignes de prestations
+        index_debut = page_num * lignes_par_page
+        y_totaux_tableau, _, _ = dessiner_lignes_prestations(c, width, groupe_prestations, y_table, index_debut)
+        
+        # Si dernière page, dessiner les totaux, signature et conditions
+        if est_derniere_page:
+            y_totaux = y_totaux_tableau
+            
+            # Dessiner les totaux
+            y_fin_totaux = dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, data.tva_taux, total_ht_final, total_ttc, data)
+            
+            # Bloc signature À GAUCHE (au niveau des totaux)
+            y_signature = y_totaux - 5*mm
+            c.setStrokeColor(GRIS_CLAIR)
+            c.setLineWidth(1)
+            c.roundRect(15*mm, y_signature - 35*mm, 80*mm, 40*mm, 3*mm, fill=False, stroke=True)
+            
+            c.setFillColor(GRIS_TEXTE)
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(20*mm, y_signature - 3*mm, "Bon pour accord")
+            c.setFont("Helvetica", 8)
+            c.drawString(20*mm, y_signature - 13*mm, "Date :")
+            c.drawString(20*mm, y_signature - 23*mm, "Signature :")
+            c.setFont("Helvetica-Oblique", 7)
+            c.drawString(20*mm, y_signature - 31*mm, "(Précédée de \"Bon pour accord\")")
+            
+            # Dessiner les conditions
+            y_conditions = y_fin_totaux - 45*mm
+            c.setFillColor(GRIS_CLAIR)
+            c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
+            
+            c.setFillColor(BLEU_PRINCIPAL)
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
+            
+            c.setFillColor(GRIS_FONCE)
+            c.setFont("Helvetica", 9)
+            c.drawString(20*mm, y_conditions - 8*mm, f"• Délai de réalisation : {data.delai_realisation}")
+            c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
+            c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
+        
+        # Dessiner le footer sur chaque page
+        dessiner_pied_page(c, width, data, mention_tva)
+        
+        # Si ce n'est pas la dernière page, créer une nouvelle page
+        if not est_derniere_page:
+            c.showPage()
+    
     c.save()
     
-    return filepath, numero_devis, total_ht, total_ttc
+    return filepath, numero_devis, total_ht_final, total_ttc
 
 
 def generer_pdf_facture(data: FactureRequest) -> str:
@@ -1277,6 +1335,29 @@ async def download_file(filename: str):
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+@app.get("/debug-env")
+def debug_env():
+    """Endpoint de debug pour voir les variables d'environnement (à supprimer après)"""
+    all_env = dict(os.environ)
+    # Masquer les valeurs sensibles
+    safe_env = {}
+    for key, value in all_env.items():
+        if any(sensitive in key.upper() for sensitive in ['KEY', 'PASSWORD', 'SECRET', 'TOKEN']):
+            safe_env[key] = f"{value[:10]}... (masqué)" if value else "VIDE"
+        else:
+            safe_env[key] = value[:50] + "..." if len(value) > 50 else value
+    
+    return {
+        "all_env_keys": sorted(list(all_env.keys())),
+        "supabase_vars": {
+            "SUPABASE_URL": "OUI" if os.getenv("SUPABASE_URL") else "NON",
+            "SUPABASE_SERVICE_KEY": "OUI" if os.getenv("SUPABASE_SERVICE_KEY") else "NON",
+            "RAILWAY_SUPABASE_URL": "OUI" if os.getenv("RAILWAY_SUPABASE_URL") else "NON",
+            "DATABASE_URL": "OUI" if os.getenv("DATABASE_URL") else "NON",
+        },
+        "safe_env": safe_env
+    }
 
 
 if __name__ == "__main__":
