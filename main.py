@@ -195,14 +195,12 @@ def upload_to_supabase(filepath: str, filename: str) -> str:
         # Ne pas supprimer le fichier local en cas d'erreur
         return f"/download/{filename}"
 
-# Couleurs
-BLEU_PRINCIPAL = HexColor('#0d7377')
+# Couleurs par défaut (utilisées si couleur_pdf n'est pas défini)
+COULEUR_DEFAUT = '#2F665B'
 BLEU_CLAIR = HexColor('#3498db')
 GRIS_FONCE = HexColor('#2c3e50')
 GRIS_CLAIR = HexColor('#ecf0f1')
 GRIS_TEXTE = HexColor('#555555')
-VERT_FACTURE = HexColor('#0d7377')
-VERT_OLIVE = HexColor('#0d7377')
 
 
 # ==================== MODÈLES ====================
@@ -230,6 +228,7 @@ class Entreprise(BaseModel):
     capital_social: Optional[str] = ""
     rcs: Optional[str] = ""
     tva_intracommunautaire: Optional[str] = ""
+    couleur_pdf: Optional[str] = None
 
 class Client(BaseModel):
     nom: str
@@ -282,6 +281,44 @@ class FactureRequest(BaseModel):
 
 # ==================== FONCTIONS UTILITAIRES ====================
 
+def get_couleur_principale(data) -> HexColor:
+    """Récupère la couleur principale depuis couleur_pdf ou utilise la couleur par défaut"""
+    couleur_hex = data.entreprise.couleur_pdf if data.entreprise.couleur_pdf else COULEUR_DEFAUT
+    # S'assurer que la couleur commence par #
+    if not couleur_hex.startswith('#'):
+        couleur_hex = '#' + couleur_hex
+    try:
+        return HexColor(couleur_hex)
+    except:
+        # En cas d'erreur, utiliser la couleur par défaut
+        return HexColor(COULEUR_DEFAUT)
+
+def hex_to_rgb(hex_color: str) -> tuple:
+    """Convertit une couleur hex (#RRGGBB) en tuple RGB (r, g, b)"""
+    # Enlever le # si présent
+    hex_color = hex_color.lstrip('#')
+    try:
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    except:
+        # En cas d'erreur, retourner la couleur par défaut
+        hex_default = COULEUR_DEFAUT.lstrip('#')
+        return tuple(int(hex_default[i:i+2], 16) for i in (0, 2, 4))
+
+def get_couleur_principale_rgb(data) -> RGBColor:
+    """Récupère la couleur principale au format RGBColor pour Word"""
+    couleur_hex = data.entreprise.couleur_pdf if data.entreprise.couleur_pdf else COULEUR_DEFAUT
+    # S'assurer que la couleur commence par #
+    if not couleur_hex.startswith('#'):
+        couleur_hex = '#' + couleur_hex
+    r, g, b = hex_to_rgb(couleur_hex)
+    return RGBColor(r, g, b)
+
+def get_couleur_principale_hex_string(data) -> str:
+    """Récupère la couleur principale au format hex string (sans #) pour Word set_cell_shading"""
+    couleur_hex = data.entreprise.couleur_pdf if data.entreprise.couleur_pdf else COULEUR_DEFAUT
+    # Enlever le # si présent
+    return couleur_hex.lstrip('#')
+
 def telecharger_logo(logo_url: str) -> Optional[ImageReader]:
     try:
         if not logo_url or logo_url.strip() == "":
@@ -328,7 +365,7 @@ def dessiner_bloc_emetteur(c, width, height, data, y_position):
     c.setFillColor(GRIS_CLAIR)
     c.roundRect(15*mm, y_position - 32*mm, 85*mm, 38*mm, 3*mm, fill=True, stroke=False)
     
-    c.setFillColor(BLEU_PRINCIPAL)
+    c.setFillColor(get_couleur_principale(data))
     c.setFont("Helvetica-Bold", 10)
     c.drawString(20*mm, y_position, "ÉMETTEUR")
     
@@ -377,7 +414,7 @@ def dessiner_bloc_client(c, width, height, data, y_position):
     c.setFillColor(GRIS_CLAIR)
     c.roundRect(110*mm, y_position - 32*mm, 85*mm, 38*mm, 3*mm, fill=True, stroke=False)
     
-    c.setFillColor(BLEU_PRINCIPAL)
+    c.setFillColor(get_couleur_principale(data))
     c.setFont("Helvetica-Bold", 10)
     c.drawString(115*mm, y_position, "DESTINATAIRE")
     
@@ -422,7 +459,7 @@ def dessiner_bloc_client(c, width, height, data, y_position):
 
 def dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite):
     """Dessine l'en-tête de page (pour la première page et les pages suivantes)"""
-    c.setFillColor(BLEU_PRINCIPAL)
+    c.setFillColor(get_couleur_principale(data))
     c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
     
     text_start_x = 15*mm
@@ -498,7 +535,7 @@ def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_
         c.setFont("Helvetica", 10)
         y_offset += 6*mm
     
-    c.setFillColor(BLEU_PRINCIPAL)
+    c.setFillColor(get_couleur_principale(data))
     c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
     
     c.setFillColor(white)
@@ -509,10 +546,10 @@ def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_
     return y_totaux - y_offset - 8*mm  # Retourner la position Y finale
 
 
-def dessiner_lignes_prestations(c, width, prestations, y_table, index_debut=0):
+def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debut=0):
     """Dessine les lignes de prestations (en-tête + lignes) et retourne la position Y finale et les totaux calculés"""
     # En-tête du tableau
-    c.setFillColor(BLEU_PRINCIPAL)
+    c.setFillColor(get_couleur_principale(data))
     c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
     
     c.setFillColor(white)
@@ -680,7 +717,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
 
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
-    c.setStrokeColor(BLEU_PRINCIPAL)
+    c.setStrokeColor(get_couleur_principale(data))
     c.setLineWidth(2)
     c.line(15*mm, 35*mm, width - 15*mm, 35*mm)
     
@@ -807,7 +844,7 @@ def generer_pdf_devis(data: DevisRequest) -> str:
         
         # Dessiner les lignes de prestations
         index_debut = page_num * lignes_par_page
-        y_totaux_tableau, _, _ = dessiner_lignes_prestations(c, width, groupe_prestations, y_table, index_debut)
+        y_totaux_tableau, _, _ = dessiner_lignes_prestations(c, width, groupe_prestations, y_table, data, index_debut)
         
         # Si dernière page, dessiner les totaux, signature et conditions
         if est_derniere_page:
@@ -854,7 +891,7 @@ def generer_pdf_devis(data: DevisRequest) -> str:
             c.setFillColor(GRIS_CLAIR)
             c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
             
-            c.setFillColor(BLEU_PRINCIPAL)
+            c.setFillColor(get_couleur_principale(data))
             c.setFont("Helvetica-Bold", 10)
             c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
             
@@ -892,7 +929,7 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    c.setFillColor(VERT_FACTURE)
+    c.setFillColor(get_couleur_principale(data))
     c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
     
     text_start_x = 15*mm
@@ -954,7 +991,7 @@ def generer_pdf_facture(data: FactureRequest) -> str:
     c.setFillColor(GRIS_CLAIR)
     c.roundRect(15*mm, y_paiement - 30*mm, width - 30*mm, 40*mm, 3*mm, fill=True, stroke=False)
     
-    c.setFillColor(VERT_FACTURE)
+    c.setFillColor(get_couleur_principale(data))
     c.setFont("Helvetica-Bold", 10)
     c.drawString(20*mm, y_paiement + 2*mm, "INFORMATIONS DE PAIEMENT")
     
@@ -978,7 +1015,7 @@ def generer_pdf_facture(data: FactureRequest) -> str:
         c.setFillColor(GRIS_CLAIR)
         c.roundRect(15*mm, y_rib - 20*mm, width - 30*mm, 30*mm, 3*mm, fill=True, stroke=False)
         
-        c.setFillColor(VERT_FACTURE)
+        c.setFillColor(get_couleur_principale(data))
         c.setFont("Helvetica-Bold", 10)
         c.drawString(20*mm, y_rib + 2*mm, "COORDONNÉES BANCAIRES")
         
@@ -1037,7 +1074,7 @@ def generer_word_devis(data: DevisRequest) -> str:
     titre = doc.add_heading(data.entreprise.nom.upper(), 0)
     titre.alignment = WD_ALIGN_PARAGRAPH.LEFT
     for run in titre.runs:
-        run.font.color.rgb = RGBColor(26, 82, 118)
+        run.font.color.rgb = get_couleur_principale_rgb(data)
     
     if data.entreprise.gerant:
         p = doc.add_paragraph(f"Gérant : {data.entreprise.gerant}")
@@ -1104,7 +1141,7 @@ def generer_word_devis(data: DevisRequest) -> str:
         header_cells[i].text = header
         header_cells[i].paragraphs[0].runs[0].bold = True
         header_cells[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-        set_cell_shading(header_cells[i], "1a5276")
+        set_cell_shading(header_cells[i], get_couleur_principale_hex_string(data))
     
     # Lignes
     total_ht = 0
@@ -1210,7 +1247,7 @@ def generer_word_facture(data: FactureRequest) -> str:
     titre = doc.add_heading(data.entreprise.nom.upper(), 0)
     titre.alignment = WD_ALIGN_PARAGRAPH.LEFT
     for run in titre.runs:
-        run.font.color.rgb = RGBColor(39, 174, 96)  # Vert pour facture
+        run.font.color.rgb = get_couleur_principale_rgb(data)
     
     if data.entreprise.gerant:
         p = doc.add_paragraph(f"Gérant : {data.entreprise.gerant}")
@@ -1221,7 +1258,7 @@ def generer_word_facture(data: FactureRequest) -> str:
     titre_facture = doc.add_heading("FACTURE", 1)
     titre_facture.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     for run in titre_facture.runs:
-        run.font.color.rgb = RGBColor(39, 174, 96)
+        run.font.color.rgb = get_couleur_principale_rgb(data)
     
     p = doc.add_paragraph(f"N° {numero_facture}")
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -1245,7 +1282,7 @@ def generer_word_facture(data: FactureRequest) -> str:
     p = cell_emetteur.add_paragraph()
     run = p.add_run("ÉMETTEUR")
     run.bold = True
-    run.font.color.rgb = RGBColor(39, 174, 96)
+    run.font.color.rgb = get_couleur_principale_rgb(data)
     cell_emetteur.add_paragraph(data.entreprise.nom)
     cell_emetteur.add_paragraph(data.entreprise.adresse)
     if data.entreprise.cp_ville:
@@ -1260,7 +1297,7 @@ def generer_word_facture(data: FactureRequest) -> str:
     p = cell_dest.add_paragraph()
     run = p.add_run("DESTINATAIRE")
     run.bold = True
-    run.font.color.rgb = RGBColor(39, 174, 96)
+    run.font.color.rgb = get_couleur_principale_rgb(data)
     cell_dest.add_paragraph(data.client.nom)
     if data.client.adresse:
         cell_dest.add_paragraph(data.client.adresse)
@@ -1284,7 +1321,7 @@ def generer_word_facture(data: FactureRequest) -> str:
         header_cells[i].text = header
         header_cells[i].paragraphs[0].runs[0].bold = True
         header_cells[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-        set_cell_shading(header_cells[i], "27ae60")
+        set_cell_shading(header_cells[i], get_couleur_principale_hex_string(data))
     
     # Lignes
     total_ht = 0
@@ -1322,7 +1359,7 @@ def generer_word_facture(data: FactureRequest) -> str:
     run = p.add_run(f"TOTAL TTC : {total_ttc:.2f} €")
     run.bold = True
     run.font.size = Pt(14)
-    run.font.color.rgb = RGBColor(39, 174, 96)
+    run.font.color.rgb = get_couleur_principale_rgb(data)
     
     doc.add_paragraph()
     
