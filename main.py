@@ -558,7 +558,125 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, index_debut=0):
     c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
     
     return y_ligne - 10*mm, total_ht_avant_acompte, total_acompte
+
+
+def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
+    """Dessine le tableau des prestations pour une facture avec totaux"""
+    # En-tête du tableau
+    c.setFillColor(BLEU_PRINCIPAL)
+    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
     
+    c.setFillColor(white)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(18*mm, y_table + 3*mm, "Description")
+    c.drawString(105*mm, y_table + 3*mm, "Qté")
+    c.drawString(120*mm, y_table + 3*mm, "Unité")
+    c.drawString(142*mm, y_table + 3*mm, "P.U. HT")
+    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
+    
+    y_ligne = y_table - 2*mm
+    total_ht_avant_acompte = 0
+    total_acompte = 0
+    
+    # Dessiner les lignes
+    for i, prestation in enumerate(data.prestations):
+        y_ligne -= 10*mm
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        
+        # Séparer les prestations positives et les acomptes (négatifs)
+        if total_ligne >= 0:
+            total_ht_avant_acompte += total_ligne
+        else:
+            total_acompte += abs(total_ligne)
+        
+        # Alterner les couleurs de fond
+        if i % 2 == 0:
+            c.setFillColor(HexColor('#f8f9fa'))
+            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, 10*mm, fill=True, stroke=False)
+        
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 9)
+        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(prestation.description, 50))
+        c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
+        c.drawString(120*mm, y_ligne + 2*mm, prestation.unite)
+        c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+    
+    y_ligne -= 5*mm
+    
+    # Ligne de séparation
+    c.setStrokeColor(GRIS_CLAIR)
+    c.setLineWidth(1)
+    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+    
+    y_totaux = y_ligne - 10*mm
+    
+    # Calcul de la remise
+    remise = 0
+    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
+        if data.remise_type == "pourcentage":
+            remise = total_ht_avant_acompte * (data.remise_valeur / 100)
+        elif data.remise_type == "montant":
+            remise = data.remise_valeur
+    
+    # Appliquer la remise, puis déduire l'acompte
+    total_ht_apres_remise = total_ht_avant_acompte - remise
+    total_ht_final = total_ht_apres_remise - total_acompte
+    montant_tva = total_ht_final * (tva_taux / 100)
+    total_ttc = total_ht_final + montant_tva
+    
+    # Pour l'affichage, utiliser le total HT avant remise et acompte
+    total_ht = total_ht_avant_acompte
+    
+    x_label = 130*mm
+    x_value = width - 18*mm
+    c.setFillColor(GRIS_FONCE)
+    c.setFont("Helvetica", 10)
+    c.drawString(x_label, y_totaux, "Total HT")
+    c.drawRightString(x_value, y_totaux, f"{total_ht:.2f} €")
+    
+    # Afficher la remise si elle existe
+    y_offset = 6*mm
+    if remise > 0:
+        if hasattr(data, 'remise_type') and data.remise_type == "pourcentage":
+            c.drawString(x_label, y_totaux - y_offset, f"Remise ({data.remise_valeur}%)")
+        else:
+            c.drawString(x_label, y_totaux - y_offset, "Remise")
+        c.setFillColor(HexColor('#e74c3c'))
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 6*mm
+    
+    # Afficher "Total HT après remise" si remise ou acompte
+    if remise > 0 or total_acompte > 0:
+        c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
+        y_offset += 6*mm
+    
+    # Afficher l'acompte si présent
+    if total_acompte > 0:
+        c.drawString(x_label, y_totaux - y_offset, "Acompte déduit")
+        c.setFillColor(HexColor('#e74c3c'))
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 6*mm
+    
+    if tva_taux > 0:
+        c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
+        y_offset += 6*mm
+    else:
+        c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+        y_offset += 6*mm
+    
+    # Total TTC
+    c.setFillColor(GRIS_FONCE)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
+    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc:.2f} €")
+    
+    return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc
+
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
     c.setStrokeColor(BLEU_PRINCIPAL)
