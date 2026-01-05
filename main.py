@@ -601,7 +601,7 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
 def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     """Dessine le tableau des prestations pour une facture avec totaux"""
     # En-tête du tableau
-    c.setFillColor(BLEU_PRINCIPAL)
+    c.setFillColor(get_couleur_principale(data))
     c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
     
     c.setFillColor(white)
@@ -767,7 +767,7 @@ def dessiner_pied_page(c, width, data, mention_tva=""):
         siret_clean = data.entreprise.siret.replace(' ', '').replace('.', '')
         c.drawCentredString(width/2, 13*mm, f"TVA intracommunautaire : FR{siret_clean[:9] if len(siret_clean) >= 9 else siret_clean}")
     
-    c.setFillColor(BLEU_CLAIR)
+    c.setFillColor(get_couleur_principale(data))
     c.setFont("Helvetica-Oblique", 6)
     c.drawRightString(width - 15*mm, 8*mm, "Généré par Vocario.fr")
 
@@ -814,6 +814,10 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     prestations_groupes = []
     for i in range(0, len(data.prestations), lignes_par_page):
         prestations_groupes.append(data.prestations[i:i + lignes_par_page])
+    
+    # Si aucune prestation, créer au moins une page vide
+    if not prestations_groupes:
+        prestations_groupes = [[]]
     
     mention_tva = ""
     if data.tva_taux == 0:
@@ -912,7 +916,12 @@ def generer_pdf_devis(data: DevisRequest) -> str:
         if not est_derniere_page:
             c.showPage()
     
-    c.save()
+    try:
+        c.save()
+        print(f"✅ PDF devis sauvegardé: {filepath}")
+    except Exception as e:
+        print(f"❌ Erreur lors de la sauvegarde du PDF: {e}")
+        raise
     
     return filepath, numero_devis, total_ht_final, total_ttc
 
@@ -1031,7 +1040,12 @@ def generer_pdf_facture(data: FactureRequest) -> str:
         mention_tva = data.mention_legale_tva or "TVA non applicable, article 293 B du Code général des impôts"
     
     dessiner_pied_page(c, width, data, mention_tva)
-    c.save()
+    try:
+        c.save()
+        print(f"✅ PDF facture sauvegardé: {filepath}")
+    except Exception as e:
+        print(f"❌ Erreur lors de la sauvegarde du PDF: {e}")
+        raise
     
     return filepath, numero_facture, total_ht, total_ttc
 
@@ -1104,7 +1118,7 @@ def generer_word_devis(data: DevisRequest) -> str:
     p = cell_emetteur.add_paragraph()
     run = p.add_run("ÉMETTEUR")
     run.bold = True
-    run.font.color.rgb = RGBColor(26, 82, 118)
+    run.font.color.rgb = get_couleur_principale_rgb(data)
     cell_emetteur.add_paragraph(data.entreprise.nom)
     cell_emetteur.add_paragraph(data.entreprise.adresse)
     if data.entreprise.cp_ville:
@@ -1119,7 +1133,7 @@ def generer_word_devis(data: DevisRequest) -> str:
     p = cell_dest.add_paragraph()
     run = p.add_run("DESTINATAIRE")
     run.bold = True
-    run.font.color.rgb = RGBColor(26, 82, 118)
+    run.font.color.rgb = get_couleur_principale_rgb(data)
     cell_dest.add_paragraph(data.client.nom)
     if data.client.adresse:
         cell_dest.add_paragraph(data.client.adresse)
@@ -1179,7 +1193,7 @@ def generer_word_devis(data: DevisRequest) -> str:
     run = p.add_run(f"TOTAL TTC : {total_ttc:.2f} €")
     run.bold = True
     run.font.size = Pt(14)
-    run.font.color.rgb = RGBColor(26, 82, 118)
+    run.font.color.rgb = get_couleur_principale_rgb(data)
     
     doc.add_paragraph()
     
@@ -1400,19 +1414,32 @@ def root():
 @app.post("/generer-devis")
 async def generer_devis_endpoint(data: DevisRequest):
     try:
+        print(f"📄 Début génération devis pour client: {data.client.nom}")
+        print(f"📊 Nombre de prestations: {len(data.prestations)}")
+        print(f"🎨 Couleur PDF: {data.entreprise.couleur_pdf or 'défaut'}")
+        
         # Générer PDF
+        print("📝 Génération PDF...")
         filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(data)
+        print(f"✅ PDF généré: {filepath_pdf}")
         
         # Générer Word
+        print("📝 Génération Word...")
         filepath_word, _, _, _ = generer_word_devis(data)
         # Renommer le Word pour avoir le même numéro
         new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis}.docx")
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
+        print(f"✅ Word généré: {new_word_path}")
         
         # Upload sur Supabase Storage
+        print("📤 Upload PDF sur Supabase...")
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
+        print(f"✅ PDF uploadé: {pdf_url}")
+        
+        print("📤 Upload Word sur Supabase...")
         word_url = upload_to_supabase(new_word_path, f"{numero_devis}.docx")
+        print(f"✅ Word uploadé: {word_url}")
         
         return {
             "success": True,
