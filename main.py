@@ -986,18 +986,29 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ============================================================
     
     # RÈGLE ABSOLUE : Les totaux sont UNIQUEMENT la somme des lignes
-    # → Total HT = somme des HT des lignes
-    # → TVA = somme des TVA calculées ligne par ligne
+    # → Total HT = somme(ht_ligne_final) des lignes
+    # → TVA = somme(tva_ligne) calculée ligne par ligne
     # → Total TTC = Total HT + TVA
     # → Aucun recalcul global, aucun ajustement, aucune correction
+    # → Interdiction absolue de recalculer la TVA à partir d'un autre total
+    
+    # Pour devis figé :
+    # - total_ht = somme(ht_ligne_final) des lignes du devis
+    # - total_tva = somme(tva_ligne) où tva_ligne = ht_ligne_final × tva_rate
+    # - total_ttc = total_ht + total_tva
+    # - Même devis ⇒ même facture (hors acompte)
+    
     total_ht_initial = sum(ligne['ht_initial'] for ligne in lignes_normalisees)
     total_ht_final = sum(ligne['ht_final'] for ligne in lignes_normalisees)
-    total_tva = sum(tva_par_taux.values())  # Somme des TVA par ligne
+    total_tva = sum(tva_par_taux.values())  # Somme des TVA par ligne (issue des lignes, pas recalculée)
     total_ttc = total_ht_final + total_tva  # Total TTC = HT + TVA
     
     # Pour facture finale issue d'un devis figé avec acompte :
     # Net à payer TTC = Total TTC devis figé - somme des acomptes TTC déjà facturés
     # La TVA n'est JAMAIS recalculée après déduction de l'acompte
+    # → NE PAS recalculer la TVA
+    # → NE PAS déduire d'HT
+    # → Calculer uniquement : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
     
     # Détecter si lignes déjà remisées
     lignes_deja_remisees = any(ligne.get('deja_remise', False) for ligne in lignes_normalisees)
@@ -1020,31 +1031,46 @@ def calculer_lignes_finales(data, tva_taux_global):
         raise ValueError(f"ERREUR COHÉRENCE: total_ttc ({total_ttc}) != total_ht + total_tva ({total_ht_final + total_tva})")
     
     # ============================================================
-    # VALIDATION STRICTE : Facture finale issue d'un devis
+    # VALIDATION STRICTE : Facture finale issue d'un devis figé
     # ============================================================
     
-    # Si facture finale issue d'un devis (lignes_finales_devis présent)
-    # → Vérifier que le total TTC correspond au devis (hors acomptes)
-    if lignes_finales_devis and len(lignes_finales_devis) > 0 and not is_facture_acompte:
-        # Calculer le total TTC du devis (sans acompte)
-        total_ttc_devis = total_ttc  # Déjà calculé à partir des lignes du devis
+    # RÈGLE ABSOLUE : Facture TTC = Devis TTC − Acompte TTC (si présent)
+    # Les montants affichés correspondent EXACTEMENT aux lignes affichées
+    # Même devis ⇒ même facture (hors acompte)
+    
+    if devis_fige and not is_facture_acompte:
+        # Facture finale issue d'un devis figé
+        # → Le total TTC de base (avant déduction acompte) doit être identique au devis
+        # → Les lignes sont strictement identiques (déjà validé plus haut)
+        # → Les totaux sont calculés uniquement comme somme des lignes
         
-        # Le total TTC de la facture finale doit être égal au total TTC du devis
-        # (l'acompte sera déduit après, mais le total TTC de base doit être identique)
-        # Note: total_ttc est déjà calculé à partir des lignes_finales_devis, donc il devrait être identique
-        # Cette validation est redondante mais sert de sécurité supplémentaire
+        # Calculer le total TTC théorique du devis (pour validation)
+        # (déjà calculé via total_ttc, mais on peut vérifier la cohérence)
+        total_ttc_theorique = sum(
+            ligne.ht_apres_remise * (1 + ligne.tva_taux / 100)
+            for ligne in lignes_finales_devis
+        )
+        
+        # Vérifier que le total TTC calculé correspond au total théorique
+        # (tolérance de 0.01 € pour arrondis)
+        if abs(total_ttc - total_ttc_theorique) > 0.01:
+            raise ValueError(
+                f"ERREUR VALIDATION DEVIS FIGÉ: "
+                f"Total TTC facture ({total_ttc:.2f} €) ≠ Total TTC devis ({total_ttc_theorique:.2f} €). "
+                f"Une facture issue d'un devis figé doit avoir un total TTC identique (hors acompte)."
+            )
         
         # Si un acompte a déjà été facturé, le net à payer sera différent
         # mais le total TTC de base (avant déduction acompte) doit être identique
         if acompte_ttc_deja_facture > 0:
             net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-            # Vérifier que le total TTC de base est cohérent
-            # (le net à payer sera différent, c'est normal)
-            pass  # Pas de vérification supplémentaire nécessaire ici
-        else:
-            # Pas d'acompte → le total TTC doit être strictement identique au devis
-            # (déjà garanti car on utilise les mêmes lignes)
-            pass
+            # Validation : net_a_payer_ttc doit être positif ou nul
+            if net_a_payer_ttc < 0:
+                raise ValueError(
+                    f"ERREUR VALIDATION ACOMPTE: "
+                    f"Net à payer TTC ({net_a_payer_ttc:.2f} €) < 0. "
+                    f"L'acompte TTC ({acompte_ttc_deja_facture:.2f} €) dépasse le total TTC ({total_ttc:.2f} €)."
+                )
     
     return {
         'lignes_normalisees': lignes_normalisees,
@@ -1056,6 +1082,7 @@ def calculer_lignes_finales(data, tva_taux_global):
         'lignes_deja_remisees': lignes_deja_remisees,
         'acompte_ttc_deja_facture': acompte_ttc_deja_facture,
         'is_facture_acompte': is_facture_acompte,
+        'devis_fige': devis_fige,  # Flag explicite : devis figé = source de vérité immuable
         'warnings': warnings  # Warnings de cohérence métier (pas d'erreur, juste information)
     }
 
@@ -1078,9 +1105,15 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     lignes_deja_remisees = resultats['lignes_deja_remisees']
     acompte_ttc_deja_facture = resultats['acompte_ttc_deja_facture']
     is_facture_acompte = resultats['is_facture_acompte']
+    devis_fige = resultats['devis_fige']  # Flag explicite : devis figé = contractuel
     
-    # Facture finale : déduire acompte TTC
+    # RÈGLE ABSOLUE : Facture finale issue d'un devis figé
+    # → NE PAS recalculer la TVA
+    # → NE PAS déduire d'HT
+    # → Calculer uniquement : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
     if not is_facture_acompte and acompte_ttc_deja_facture > 0:
+        # Facture finale avec acompte : déduire uniquement le TTC de l'acompte
+        # La TVA n'est JAMAIS recalculée après déduction de l'acompte
         net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
     else:
         net_a_payer_ttc = total_ttc
@@ -1134,6 +1167,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     # RÈGLE ABSOLUE : Les lignes affichées sont DÉJÀ remisées
     # → AUCUNE remise globale à afficher (incompatible avec multi-TVA)
     # → Afficher UNIQUEMENT : Total HT, TVA par taux, Total TTC
+    # → Pour devis figé : TVA issue des lignes, pas recalculée
     x_label = 130*mm
     x_value = width - 18*mm
     c.setFillColor(GRIS_FONCE)
@@ -1142,11 +1176,14 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     y_offset = 0
     
     # Afficher UNIQUEMENT : Total HT (somme des lignes déjà remisées)
+    # Pour devis figé : total_ht = somme(ht_ligne_final) des lignes du devis
     c.drawString(x_label, y_totaux, "Total HT")
     c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
     y_offset = 6*mm
     
     # Afficher TVA par taux
+    # Pour devis figé : TVA issue des lignes (tva_ligne = ht_ligne_final × tva_rate)
+    # → Aucune redistribution, aucun recalcul global
     for taux in sorted(tva_par_taux.keys()):
         montant = tva_par_taux[taux]
         if taux > 0:
@@ -1158,12 +1195,15 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
             y_offset += 6*mm
     
     # Total TTC
+    # Pour devis figé : total_ttc = total_ht + total_tva (somme des lignes uniquement)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
     c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc:.2f} €")
     y_offset += 6*mm
     
-    # Facture finale : acompte et net à payer
+    # Facture finale issue d'un devis figé : acompte et net à payer
+    # RÈGLE ABSOLUE : NE PAS recalculer la TVA, NE PAS déduire d'HT
+    # → Calculer uniquement : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
     if not is_facture_acompte and acompte_ttc_deja_facture > 0:
         c.setFont("Helvetica", 10)
         c.setFillColor(GRIS_FONCE)
