@@ -242,6 +242,7 @@ class DevisRequest(BaseModel):
     entreprise: Entreprise
     client: Client
     prestations: List[Prestation]
+    numero_devis: Optional[str] = None  # Numéro fourni par le frontend
     tva_taux: float = 20.0
     conditions_paiement: str = "30% à la commande, solde à réception"
     delai_realisation: str = "À définir"
@@ -800,7 +801,11 @@ def dessiner_pied_page(c, width, data, mention_tva=""):
 
 
 def generer_pdf_devis(data: DevisRequest) -> str:
-    numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    # Utiliser le numéro fourni par le frontend, sinon en générer un
+    if hasattr(data, 'numero_devis') and data.numero_devis and str(data.numero_devis).strip():
+        numero_devis = data.numero_devis
+    else:
+        numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
     filename = f"{numero_devis}.pdf"
     filepath = os.path.join(PDF_FOLDER, filename)
     
@@ -1100,7 +1105,11 @@ def set_cell_shading(cell, color):
 
 def generer_word_devis(data: DevisRequest) -> str:
     """Génère un devis au format Word"""
-    numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    # Utiliser le numéro fourni par le frontend, sinon en générer un
+    if hasattr(data, 'numero_devis') and data.numero_devis and str(data.numero_devis).strip():
+        numero_devis = data.numero_devis
+    else:
+        numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
     filename = f"{numero_devis}.docx"
     filepath = os.path.join(PDF_FOLDER, filename)
     
