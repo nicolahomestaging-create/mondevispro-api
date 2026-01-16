@@ -665,18 +665,52 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     # RÈGLE FISCALE : Si lignes_finales_devis est présent, utiliser directement sans recalcul
     # Ces lignes sont la source unique de vérité (déjà calculées avec remise sur le devis)
     if lignes_finales_devis and len(lignes_finales_devis) > 0:
+        # ÉTAPE 1 : Normalisation et fusion des lignes (AVANT tout calcul)
+        # Normaliser les descriptions pour éviter les doublons (mur/MUR)
+        descriptions_vues = {}
+        lignes_finales_normalisees = []
+        
+        for ligne in lignes_finales_devis:
+            desc_normalisee = ligne.description.strip().lower()
+            
+            # Si description déjà vue, fusionner avec la ligne existante
+            if desc_normalisee in descriptions_vues:
+                index_existant = descriptions_vues[desc_normalisee]
+                ligne_existante = lignes_finales_normalisees[index_existant]
+                
+                # Vérifier que le taux TVA est identique (sinon erreur)
+                if ligne_existante['tva_taux'] != ligne.tva_taux:
+                    raise ValueError(f"Conflit de taux TVA pour '{ligne.description}': {ligne_existante['tva_taux']}% vs {ligne.tva_taux}%. Les lignes avec la même description doivent avoir le même taux TVA.")
+                
+                # Fusionner : additionner les HT et quantités
+                ligne_existante['ht_apres_remise'] += ligne.ht_apres_remise
+                ligne_existante['quantite'] += ligne.quantite
+            else:
+                # Nouvelle ligne
+                descriptions_vues[desc_normalisee] = len(lignes_finales_normalisees)
+                lignes_finales_normalisees.append({
+                    'description': ligne.description,  # Garder la description originale pour affichage
+                    'description_norm': desc_normalisee,
+                    'quantite': ligne.quantite,
+                    'unite': ligne.unite,
+                    'ht_apres_remise': ligne.ht_apres_remise,
+                    'tva_taux': ligne.tva_taux
+                })
+        
+        # ÉTAPE 2 : Calculer les totaux UNIQUEMENT à partir des lignes finales (source de vérité)
         # MODE : Utiliser les lignes finales du devis (AUCUN RECALCUL)
-        total_ht_avant_remise = 0
+        total_ht_avant_remise = 0  # Non utilisé si lignes déjà remisées
         total_ht_apres_remise = 0
         tva_par_taux = {}
-        remise_totale = 0  # Sera calculé si nécessaire
+        remise_totale = 0  # Ne sera pas affichée si lignes déjà remisées
         
-        for i, ligne_finale in enumerate(lignes_finales_devis):
+        for i, ligne_norm in enumerate(lignes_finales_normalisees):
             y_ligne -= 10*mm
             
-            # Utiliser directement les valeurs figées du devis
-            ht_ligne_final = ligne_finale.ht_apres_remise
-            tva_taux_ligne = ligne_finale.tva_taux
+            # Utiliser directement les valeurs figées du devis (après normalisation)
+            # ht_ligne_final est définitif, tva_rate est figé
+            ht_ligne_final = ligne_norm['ht_apres_remise']
+            tva_taux_ligne = ligne_norm['tva_taux']
             
             # Si facture d'acompte : calculer l'acompte sur le HT après remise
             if is_facture_acompte and taux_acompte is not None and taux_acompte > 0:
@@ -685,9 +719,10 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
                 # Facture complète : utiliser tout le HT après remise
                 total_ligne_ht_final = ht_ligne_final
             
+            # RÈGLE : total_ht = sum(ligne.ht_ligne_final for ligne in lignes)
             total_ht_apres_remise += total_ligne_ht_final
             
-            # Calculer la TVA sur le HT final (acompte ou complet)
+            # RÈGLE : total_tva = sum(ligne.ht_ligne_final * ligne.tva_rate for ligne in lignes)
             montant_tva_ligne = total_ligne_ht_final * (tva_taux_ligne / 100)
             tva_par_taux[tva_taux_ligne] = tva_par_taux.get(tva_taux_ligne, 0) + montant_tva_ligne
             
@@ -698,29 +733,22 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
             
             c.setFillColor(GRIS_FONCE)
             c.setFont("Helvetica", 9)
-            c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(ligne_finale.description, 50))
-            c.drawString(90*mm, y_ligne + 2*mm, str(ligne_finale.quantite))
-            c.drawString(105*mm, y_ligne + 2*mm, ligne_finale.unite)
+            c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(ligne_norm['description'], 50))
+            c.drawString(90*mm, y_ligne + 2*mm, str(ligne_norm['quantite']))
+            c.drawString(105*mm, y_ligne + 2*mm, ligne_norm['unite'])
             
             # Afficher le prix unitaire
             if is_facture_acompte and taux_acompte is not None:
-                prix_affiche = total_ligne_ht_final / ligne_finale.quantite if ligne_finale.quantite > 0 else 0
+                prix_affiche = total_ligne_ht_final / ligne_norm['quantite'] if ligne_norm['quantite'] > 0 else 0
             else:
-                prix_affiche = ht_ligne_final / ligne_finale.quantite if ligne_finale.quantite > 0 else 0
+                prix_affiche = ht_ligne_final / ligne_norm['quantite'] if ligne_norm['quantite'] > 0 else 0
             
             c.drawString(125*mm, y_ligne + 2*mm, f"{prix_affiche:.2f} €")
             c.drawString(150*mm, y_ligne + 2*mm, f"{tva_taux_ligne:.1f}%")
             c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne_ht_final:.2f} €")
         
-        # Calculer remise_totale pour affichage (si nécessaire)
-        if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur:
-            if data.remise_type == "pourcentage":
-                # Estimer le HT avant remise à partir du HT après remise
-                if data.remise_valeur > 0 and data.remise_valeur < 100:
-                    total_ht_avant_remise = total_ht_apres_remise / (1 - data.remise_valeur / 100)
-                    remise_totale = total_ht_avant_remise - total_ht_apres_remise
-            elif data.remise_type == "montant":
-                remise_totale = data.remise_valeur
+        # Les lignes sont déjà remisées, donc remise_totale reste à 0
+        # (ne sera pas affichée dans les totaux)
     else:
         # MODE : Calculer normalement (pour compatibilité avec ancien code)
         # Calculer la remise (pourcentage ou montant)
@@ -853,13 +881,15 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     
     y_totaux = y_ligne - 10*mm
     
-    # Calculer les totaux finaux (selon règles fiscales françaises)
-    # Total HT après remise
-    total_ht_final = total_ht_apres_remise
-    # Total TVA (calculée ligne par ligne après remise)
-    total_tva = sum(tva_par_taux.values())
-    # Total TTC du devis
-    total_ttc_devis = total_ht_final + total_tva
+    # RÈGLE ABSOLUE : Calculer les totaux UNIQUEMENT à partir des lignes finales
+    # total_ht = sum(ligne.ht_ligne_final for ligne in lignes)
+    # total_tva = sum(ligne.ht_ligne_final * ligne.tva_rate for ligne in lignes)
+    # total_ttc = total_ht + total_tva
+    # ❌ Aucune remise, aucun recalcul indirect, aucun ajustement global
+    
+    total_ht_final = total_ht_apres_remise  # Somme des lignes finales
+    total_tva = sum(tva_par_taux.values())  # Somme des TVA par ligne
+    total_ttc_devis = total_ht_final + total_tva  # Total TTC
     
     # Pour facture finale : déduire l'acompte TTC déjà facturé
     # Pour facture d'acompte : pas de déduction
@@ -868,33 +898,46 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     else:
         net_a_payer_ttc = total_ttc_devis
     
-    # Pour l'affichage
-    total_ht = total_ht_avant_remise
+    # RÈGLE : Si lignes_finales_devis est présent, les lignes sont DÉJÀ remisées
+    # → NE PAS afficher de remise globale (sinon remise appliquée deux fois)
+    lignes_deja_remisees = (lignes_finales_devis and len(lignes_finales_devis) > 0)
     
     x_label = 130*mm
     x_value = width - 18*mm
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica", 10)
-    c.drawString(x_label, y_totaux, "Total HT")
-    c.drawRightString(x_value, y_totaux, f"{total_ht:.2f} €")
     
-    # Afficher la remise si elle existe
-    y_offset = 6*mm
-    if remise_totale > 0:
-        if hasattr(data, 'remise_type') and data.remise_type == "pourcentage":
-            c.drawString(x_label, y_totaux - y_offset, f"Remise ({data.remise_valeur}%)")
-        else:
-            c.drawString(x_label, y_totaux - y_offset, "Remise")
-        c.setFillColor(HexColor('#e74c3c'))
-        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_totale:.2f} €")
-        c.setFillColor(GRIS_FONCE)
-        y_offset += 6*mm
+    y_offset = 0
     
-    # Afficher "Total HT après remise" si remise
-    if remise_totale > 0:
-        c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
-        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
-        y_offset += 6*mm
+    # Si lignes déjà remisées : afficher directement "Total HT" (somme des lignes)
+    # Sinon : afficher "Total HT", puis remise, puis "Total HT après remise"
+    if lignes_deja_remisees:
+        # Lignes déjà remisées : Total HT = somme des lignes (pas de remise à afficher)
+        c.drawString(x_label, y_totaux, "Total HT")
+        c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
+        y_offset = 6*mm
+    else:
+        # Lignes non remisées : afficher Total HT avant remise, puis remise, puis après remise
+        c.drawString(x_label, y_totaux, "Total HT")
+        c.drawRightString(x_value, y_totaux, f"{total_ht_avant_remise:.2f} €")
+        y_offset = 6*mm
+        
+        # Afficher la remise si elle existe
+        if remise_totale > 0:
+            if hasattr(data, 'remise_type') and data.remise_type == "pourcentage":
+                c.drawString(x_label, y_totaux - y_offset, f"Remise ({data.remise_valeur}%)")
+            else:
+                c.drawString(x_label, y_totaux - y_offset, "Remise")
+            c.setFillColor(HexColor('#e74c3c'))
+            c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_totale:.2f} €")
+            c.setFillColor(GRIS_FONCE)
+            y_offset += 6*mm
+        
+        # Afficher "Total HT après remise" si remise
+        if remise_totale > 0:
+            c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
+            c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
+            y_offset += 6*mm
     
     # Afficher chaque taux de TVA séparément
     for taux in sorted(tva_par_taux.keys()):
