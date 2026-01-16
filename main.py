@@ -503,7 +503,13 @@ def dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_valid
 
 
 def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, remise_totale, tva_par_taux, total_ttc, data, lignes_deja_remisees):
-    """Dessine les totaux pour un devis - utilise les lignes normalisées comme source de vérité"""
+    """
+    Dessine les totaux pour un devis - utilise les lignes normalisées comme source de vérité
+    
+    RÈGLE ABSOLUE : Les lignes affichées sont DÉJÀ remisées (remise appliquée ligne par ligne)
+    → AUCUNE remise globale à afficher (incompatible avec multi-TVA)
+    → Afficher UNIQUEMENT : Total HT, TVA par taux, Total TTC
+    """
     x_label = 130*mm
     x_value = width - 18*mm
     c.setFillColor(GRIS_FONCE)
@@ -511,33 +517,12 @@ def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, 
     
     y_offset = 0
     
-    # RÈGLE : Si lignes déjà remisées → AUCUNE remise à afficher
-    if lignes_deja_remisees:
-        # Afficher UNIQUEMENT : Total HT (somme des lignes)
-        c.drawString(x_label, y_totaux, "Total HT")
-        c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
-        y_offset = 6*mm
-    else:
-        # Afficher : Total HT, Remise, Total HT après remise
-        c.drawString(x_label, y_totaux, "Total HT")
-        c.drawRightString(x_value, y_totaux, f"{total_ht_initial:.2f} €")
-        y_offset = 6*mm
-        
-        if remise_totale > 0:
-            remise_type = getattr(data, 'remise_type', None)
-            if remise_type == "pourcentage":
-                remise_valeur = getattr(data, 'remise_valeur', 0)
-                c.drawString(x_label, y_totaux - y_offset, f"Remise ({remise_valeur}%)")
-            else:
-                c.drawString(x_label, y_totaux - y_offset, "Remise")
-            c.setFillColor(HexColor('#e74c3c'))
-            c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_totale:.2f} €")
-            c.setFillColor(GRIS_FONCE)
-            y_offset += 6*mm
-            
-            c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
-            c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_final:.2f} €")
-            y_offset += 6*mm
+    # RÈGLE ABSOLUE : Les lignes sont TOUJOURS remisées (remise appliquée ligne par ligne)
+    # → Afficher UNIQUEMENT : Total HT (somme des lignes déjà remisées)
+    # → JAMAIS de "Remise" ou "Total HT après remise" (incompatible avec multi-TVA)
+    c.drawString(x_label, y_totaux, "Total HT")
+    c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
+    y_offset = 6*mm
     
     # Afficher TVA par taux
     for taux in sorted(tva_par_taux.keys()):
@@ -736,15 +721,18 @@ def calculer_lignes_finales(data, tva_taux_global):
             if ht_initial <= 0:
                 continue
             
-            # Appliquer remise ligne par ligne
+            # RÈGLE ABSOLUE : Appliquer remise ligne par ligne AVANT TVA
+            # Dans un panier multi-TVA, il n'existe PAS de remise globale
+            # La remise DOIT être appliquée ligne par ligne
             if remise_type == "pourcentage":
-                remise_ligne = ht_initial * ratio_remise
+                # ht_final = ht_initial * (1 - remise_pct)
+                ht_final = ht_initial * (1 - ratio_remise)
             elif remise_type == "montant":
+                # Répartir proportionnellement
                 remise_ligne = ht_initial * ratio_remise
+                ht_final = ht_initial - remise_ligne
             else:
-                remise_ligne = 0
-            
-            ht_final = ht_initial - remise_ligne
+                ht_final = ht_initial
             
             # Taux TVA
             tva_taux = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
@@ -919,6 +907,9 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     y_totaux = y_ligne - 10*mm
     
     # Afficher les totaux (miroir des calculs)
+    # RÈGLE ABSOLUE : Les lignes affichées sont DÉJÀ remisées
+    # → AUCUNE remise globale à afficher (incompatible avec multi-TVA)
+    # → Afficher UNIQUEMENT : Total HT, TVA par taux, Total TTC
     x_label = 130*mm
     x_value = width - 18*mm
     c.setFillColor(GRIS_FONCE)
@@ -926,35 +917,10 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     
     y_offset = 0
     
-    # RÈGLE : Si lignes déjà remisées → AUCUNE remise à afficher
-    if lignes_deja_remisees:
-        # Afficher UNIQUEMENT : Total HT (somme des lignes)
-        c.drawString(x_label, y_totaux, "Total HT")
-        c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
-        y_offset = 6*mm
-    else:
-        # Afficher : Total HT, Remise, Total HT après remise
-        remise_totale = total_ht_initial - total_ht_final
-        
-        c.drawString(x_label, y_totaux, "Total HT")
-        c.drawRightString(x_value, y_totaux, f"{total_ht_initial:.2f} €")
-        y_offset = 6*mm
-        
-        if remise_totale > 0:
-            remise_type = getattr(data, 'remise_type', None)
-            if remise_type == "pourcentage":
-                remise_valeur = getattr(data, 'remise_valeur', 0)
-                c.drawString(x_label, y_totaux - y_offset, f"Remise ({remise_valeur}%)")
-            else:
-                c.drawString(x_label, y_totaux - y_offset, "Remise")
-            c.setFillColor(HexColor('#e74c3c'))
-            c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_totale:.2f} €")
-            c.setFillColor(GRIS_FONCE)
-            y_offset += 6*mm
-            
-            c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
-            c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_final:.2f} €")
-            y_offset += 6*mm
+    # Afficher UNIQUEMENT : Total HT (somme des lignes déjà remisées)
+    c.drawString(x_label, y_totaux, "Total HT")
+    c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
+    y_offset = 6*mm
     
     # Afficher TVA par taux
     for taux in sorted(tva_par_taux.keys()):
