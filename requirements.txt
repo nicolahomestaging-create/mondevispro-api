@@ -5,4 +5,4 @@ reportlab==4.0.8
 pydantic==2.5.3
 python-docx==1.1.0
 requests==2.31.0
-supabase==2.3.4
+supabase==1.2.0
