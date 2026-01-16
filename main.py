@@ -668,16 +668,48 @@ def calculer_lignes_finales(data, tva_taux_global):
     Calcule les lignes finales avec normalisation, fusion et remise.
     Cette fonction est la SOURCE UNIQUE de vérité pour tous les calculs.
     
-    RÈGLES DE FUSION STRICTES :
+    RÈGLE MÉTIER FONDAMENTALE :
+    Un devis figé est une source de vérité ABSOLUE.
+    Si une facture est générée à partir d'un devis accepté (option A / devis figé),
+    alors AUCUN recalcul n'est autorisé.
+    
+    COMPORTEMENT DEVIS FIGÉ (STRICT) :
+    Si devis_fige == True :
+    - Utiliser UNIQUEMENT lignes_finales_devis
+    - Aucune normalisation de description
+    - Aucune fusion de lignes
+    - Aucun recalcul de TVA
+    - Aucun remapping de taux
+    - Les champs ht_final et tva_taux sont considérés COMME DÉFINITIFS
+    
+    CALCUL DES TOTAUX (unique et simple) :
+    - total_ht = somme(ligne.ht_final)
+    - total_tva = somme(ht_final × tva_taux par ligne)
+    - total_ttc = total_ht + total_tva
+    
+    FACTURE FINALE AVEC ACOMPTE :
+    Si acompte_ttc_deja_facture est présent :
+    - net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+    - NE PAS recalculer la TVA
+    - NE PAS répartir l'acompte en HT/TVA
+    
+    INTERDICTIONS EXPLICITES :
+    - INTERDIT de recalculer les lignes à partir des règles courantes
+    - INTERDIT de modifier la TVA entre devis et facture
+    - INTERDIT de "corriger" les données du devis
+    
+    CONTRÔLE DE SÉCURITÉ :
+    Si facture issue d'un devis figé ET si total recalculé ≠ total devis
+    → lever une erreur explicite
+    
+    RÈGLES DE FUSION (cas normal, pas devis figé) :
     - Fusion uniquement si description normalisée + TVA + unité identiques
     - Si description identique mais TVA ou unité différente → lignes distinctes (warning)
     - Le moteur ne corrige pas les erreurs de saisie métier, il reflète strictement les données
     
-    VALIDATION STRICTE FACTURE ISSUE D'UN DEVIS :
-    - Si lignes_finales_devis est présent, la facture est issue d'un devis
-    - Les lignes de facture DOIVENT être strictement identiques au devis (description, HT, TVA, unité)
-    - Toute modification est bloquée par une erreur ValueError
-    - Le total TTC de la facture doit correspondre au total TTC du devis (hors acomptes)
+    BUT FINAL :
+    Même devis → même facture (hors acompte).
+    Le moteur doit être DÉTERMINISTE, TRAÇABLE et FISCALLEMENT CONFORME.
     
     Retourne :
     - lignes_normalisees : liste des lignes finales (après normalisation/fusion/remise)
@@ -687,6 +719,7 @@ def calculer_lignes_finales(data, tva_taux_global):
     - total_tva : somme des TVA
     - total_ttc : total HT + total TVA
     - lignes_deja_remisees : booléen indiquant si les lignes sont déjà remisées
+    - devis_fige : booléen indiquant si c'est un devis figé (source de vérité absolue)
     - warnings : liste des warnings de cohérence métier (prestations similaires avec TVA/unité différentes)
     """
     # Récupérer les paramètres
@@ -775,11 +808,22 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 1 : CONSTRUIRE LES LIGNES FINALES (source de vérité)
     # ============================================================
     
-    # Détecter si c'est un devis figé (facture issue d'un devis)
+    # ============================================================
+    # DÉTECTION DEVIS FIGÉ (CENTRALE ET PROPAGÉE PARTOUT)
+    # ============================================================
+    
+    # RÈGLE MÉTIER FONDAMENTALE : Un devis figé est une source de vérité ABSOLUE
+    # Si une facture est générée à partir d'un devis accepté (option A / devis figé),
+    # alors AUCUN recalcul n'est autorisé.
+    
     devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
     
     # RÈGLE ABSOLUE : Si devis figé, IGNORER complètement les prestations du FactureRequest
     # Le devis figé est la source unique de vérité, aucune autre source n'est autorisée
+    # INTERDICTIONS EXPLICITES :
+    # - INTERDIT de recalculer les lignes à partir des règles courantes
+    # - INTERDIT de modifier la TVA entre devis et facture
+    # - INTERDIT de "corriger" les données du devis
     if devis_fige:
         # Vérifier qu'on n'essaie pas d'utiliser des prestations différentes
         if hasattr(data, 'prestations') and data.prestations and len(data.prestations) > 0:
@@ -791,21 +835,27 @@ def calculer_lignes_finales(data, tva_taux_global):
     lignes_finales = []  # Liste des lignes finales à afficher
     
     if devis_fige:
-        # CAS A : DEVIS FIGÉ - Facture issue d'un devis
-        # RÈGLE ABSOLUE : Utiliser DIRECTEMENT les lignes du devis, telles quelles
-        # → AUCUNE normalisation (description conservée exactement)
-        # → AUCUNE fusion (toutes les lignes conservées distinctes)
-        # → AUCUN recalcul (HT, TVA, unité figés)
-        # → AUCUNE logique métier intelligente
-        # → Les lignes sont un miroir exact du devis figé
+        # ============================================================
+        # CAS A : DEVIS FIGÉ - Facture issue d'un devis (STRICT)
+        # ============================================================
+        # RÈGLE MÉTIER FONDAMENTALE : Un devis figé est une source de vérité ABSOLUE
+        # → Utiliser UNIQUEMENT lignes_finales_devis
+        # → Aucune normalisation de description
+        # → Aucune fusion de lignes
+        # → Aucun recalcul de TVA
+        # → Aucun remapping de taux
+        # → Les champs ht_final et tva_taux sont considérés COMME DÉFINITIFS
+        
         for ligne in lignes_finales_devis:
+            # Copie directe sans aucune modification
+            # Les valeurs sont DÉFINITIVES et ne doivent JAMAIS être recalculées
             lignes_finales.append({
                 'description': ligne.description,      # Description EXACTE (pas de strip/lower)
                 'quantite': ligne.quantite,            # Quantité FIGÉE
                 'unite': ligne.unite,                   # Unité FIGÉE
                 'ht_initial': ligne.ht_apres_remise,   # HT déjà remisé (FIGÉ)
-                'ht_final': ligne.ht_apres_remise,     # HT FIGÉ (ne jamais recalculer)
-                'tva_taux': ligne.tva_taux,            # TVA FIGÉE (ne jamais modifier)
+                'ht_final': ligne.ht_apres_remise,     # HT FIGÉ (DÉFINITIF - ne jamais recalculer)
+                'tva_taux': ligne.tva_taux,            # TVA FIGÉE (DÉFINITIF - ne jamais modifier)
                 'deja_remise': True,
                 'devis_fige': True  # Flag pour bypasser TOUTE logique de traitement
             })
@@ -860,14 +910,29 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 2 : NORMALISATION ET FUSION (AVANT tout calcul)
     # ============================================================
     
+    # ============================================================
+    # ÉTAPE 2 : NORMALISATION ET FUSION (AVANT tout calcul)
+    # ============================================================
+    
     # RÈGLE ABSOLUE : Si devis figé → AUCUNE normalisation, AUCUNE fusion, AUCUN traitement
+    # INTERDICTIONS EXPLICITES :
+    # - INTERDIT de recalculer les lignes à partir des règles courantes
+    # - INTERDIT de modifier la TVA entre devis et facture
+    # - INTERDIT de "corriger" les données du devis
+    # - INTERDIT toute normalisation de description
+    # - INTERDIT toute fusion de lignes
+    # - INTERDIT tout remapping de taux TVA
+    
     if devis_fige:
+        # ============================================================
         # DEVIS FIGÉ : Utiliser les lignes telles quelles (miroir exact du devis)
+        # ============================================================
         # → Pas de normalisation (description conservée exactement, pas de strip/lower)
         # → Pas de fusion (toutes les lignes conservées distinctes, même si descriptions similaires)
         # → Pas de traitement intelligent (les lignes sont immuables)
         # → Les lignes sont déjà figées dans le devis, aucune modification autorisée
         # → Aucune logique métier intelligente n'est autorisée sur un devis figé
+        
         lignes_normalisees = []
         for i, ligne in enumerate(lignes_finales):
             # Copie directe sans aucune modification
@@ -883,17 +948,18 @@ def calculer_lignes_finales(data, tva_taux_global):
             assert ligne['unite'] == ligne_devis_originale.unite, \
                 f"ERREUR: Unité modifiée ligne {i+1}"
             assert abs(ligne['ht_final'] - ligne_devis_originale.ht_apres_remise) < 0.01, \
-                f"ERREUR: HT modifié ligne {i+1}"
+                f"ERREUR: HT modifié ligne {i+1} (facture: {ligne['ht_final']:.2f}, devis: {ligne_devis_originale.ht_apres_remise:.2f})"
             assert abs(ligne['tva_taux'] - ligne_devis_originale.tva_taux) < 0.01, \
-                f"ERREUR: TVA modifiée ligne {i+1}"
+                f"ERREUR: TVA modifiée ligne {i+1} (facture: {ligne['tva_taux']:.2f}%, devis: {ligne_devis_originale.tva_taux:.2f}%)"
             
+            # Copie directe : les valeurs sont DÉFINITIVES
             lignes_normalisees.append({
                 'description': ligne['description'],  # EXACTEMENT comme dans le devis (pas de normalisation)
                 'quantite': ligne['quantite'],        # Quantité FIGÉE
                 'unite': ligne['unite'],              # Unité FIGÉE
-                'ht_initial': ligne['ht_initial'],    # HT initial FIGÉ
-                'ht_final': ligne['ht_final'],        # HT final FIGÉ (ne jamais recalculer)
-                'tva_taux': ligne['tva_taux'],        # TVA FIGÉE (ne jamais modifier)
+                'ht_initial': ligne['ht_initial'],     # HT initial FIGÉ
+                'ht_final': ligne['ht_final'],        # HT final FIGÉ (DÉFINITIF - ne jamais recalculer)
+                'tva_taux': ligne['tva_taux'],        # TVA FIGÉE (DÉFINITIF - ne jamais modifier)
                 'deja_remise': ligne['deja_remise'],
                 'devis_fige': True
             })
@@ -973,11 +1039,15 @@ def calculer_lignes_finales(data, tva_taux_global):
     # RÈGLE ABSOLUE : TVA calculée uniquement comme ht_final × tva_taux
     # Pour devis figé : le taux TVA est FIGÉ dans chaque ligne, jamais modifié
     # → Utiliser directement le taux TVA de chaque ligne (aucun recalcul de taux)
+    # → Aucun remapping de taux, aucune redistribution
+    # → Le calcul est DÉTERMINISTE et REPRODUCTIBLE
+    
     tva_par_taux = {}
     for ligne in lignes_normalisees:
-        # TVA = ht_final × tva_taux
-        # Pour devis figé : tva_taux est déjà figé, ht_final est déjà figé
+        # TVA = ht_final × tva_taux (calcul unique et simple)
+        # Pour devis figé : tva_taux est DÉFINITIF, ht_final est DÉFINITIF
         # → Le calcul est déterministe et reproductible
+        # → Même devis → même facture (hors acompte)
         tva_ligne = ligne['ht_final'] * (ligne['tva_taux'] / 100)
         tva_par_taux[ligne['tva_taux']] = tva_par_taux.get(ligne['tva_taux'], 0) + tva_ligne
     
@@ -1031,45 +1101,57 @@ def calculer_lignes_finales(data, tva_taux_global):
         raise ValueError(f"ERREUR COHÉRENCE: total_ttc ({total_ttc}) != total_ht + total_tva ({total_ht_final + total_tva})")
     
     # ============================================================
-    # VALIDATION STRICTE : Facture finale issue d'un devis figé
+    # CONTRÔLE DE SÉCURITÉ : Facture finale issue d'un devis figé
     # ============================================================
     
-    # RÈGLE ABSOLUE : Facture TTC = Devis TTC − Acompte TTC (si présent)
-    # Les montants affichés correspondent EXACTEMENT aux lignes affichées
-    # Même devis ⇒ même facture (hors acompte)
+    # RÈGLE MÉTIER FONDAMENTALE : Même devis → même facture (hors acompte)
+    # Le moteur doit être DÉTERMINISTE, TRAÇABLE et FISCALLEMENT CONFORME
     
     if devis_fige and not is_facture_acompte:
-        # Facture finale issue d'un devis figé
-        # → Le total TTC de base (avant déduction acompte) doit être identique au devis
-        # → Les lignes sont strictement identiques (déjà validé plus haut)
-        # → Les totaux sont calculés uniquement comme somme des lignes
+        # ============================================================
+        # VALIDATION STRICTE : Facture finale issue d'un devis figé
+        # ============================================================
+        # RÈGLE ABSOLUE : Facture TTC = Devis TTC − Acompte TTC (si présent)
+        # Les montants affichés correspondent EXACTEMENT aux lignes affichées
+        # Même devis ⇒ même facture (hors acompte)
         
         # Calculer le total TTC théorique du devis (pour validation)
-        # (déjà calculé via total_ttc, mais on peut vérifier la cohérence)
+        # Formule : somme(ht_apres_remise × (1 + tva_taux / 100)) pour chaque ligne
         total_ttc_theorique = sum(
             ligne.ht_apres_remise * (1 + ligne.tva_taux / 100)
             for ligne in lignes_finales_devis
         )
         
-        # Vérifier que le total TTC calculé correspond au total théorique
-        # (tolérance de 0.01 € pour arrondis)
+        # CONTRÔLE DE SÉCURITÉ : Vérifier que le total TTC calculé correspond au total théorique
+        # Si facture issue d'un devis figé ET si total recalculé ≠ total devis
+        # → lever une erreur explicite
         if abs(total_ttc - total_ttc_theorique) > 0.01:
             raise ValueError(
-                f"ERREUR VALIDATION DEVIS FIGÉ: "
-                f"Total TTC facture ({total_ttc:.2f} €) ≠ Total TTC devis ({total_ttc_theorique:.2f} €). "
-                f"Une facture issue d'un devis figé doit avoir un total TTC identique (hors acompte)."
+                f"ERREUR CRITIQUE - INCOHÉRENCE DEVIS/FACTURE:\n"
+                f"  Total TTC facture recalculé: {total_ttc:.2f} €\n"
+                f"  Total TTC devis (source de vérité): {total_ttc_theorique:.2f} €\n"
+                f"  Écart: {abs(total_ttc - total_ttc_theorique):.2f} €\n\n"
+                f"RÈGLE VIOLÉE: Une facture issue d'un devis figé doit avoir un total TTC identique (hors acompte).\n"
+                f"Un devis figé est une source de vérité ABSOLUE. Aucun recalcul n'est autorisé.\n"
+                f"Vérifiez que les lignes du devis sont reprises à l'identique sans modification."
             )
         
         # Si un acompte a déjà été facturé, le net à payer sera différent
         # mais le total TTC de base (avant déduction acompte) doit être identique
         if acompte_ttc_deja_facture > 0:
+            # RÈGLE : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+            # → NE PAS recalculer la TVA
+            # → NE PAS répartir l'acompte en HT/TVA
             net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+            
             # Validation : net_a_payer_ttc doit être positif ou nul
             if net_a_payer_ttc < 0:
                 raise ValueError(
-                    f"ERREUR VALIDATION ACOMPTE: "
-                    f"Net à payer TTC ({net_a_payer_ttc:.2f} €) < 0. "
-                    f"L'acompte TTC ({acompte_ttc_deja_facture:.2f} €) dépasse le total TTC ({total_ttc:.2f} €)."
+                    f"ERREUR VALIDATION ACOMPTE:\n"
+                    f"  Net à payer TTC: {net_a_payer_ttc:.2f} € (négatif)\n"
+                    f"  Total TTC: {total_ttc:.2f} €\n"
+                    f"  Acompte TTC déjà facturé: {acompte_ttc_deja_facture:.2f} €\n\n"
+                    f"L'acompte TTC dépasse le total TTC. Vérifiez les montants."
                 )
     
     return {
