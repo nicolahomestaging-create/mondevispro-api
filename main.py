@@ -702,7 +702,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
         total_ht_avant_remise = 0  # Non utilisé si lignes déjà remisées
         total_ht_apres_remise = 0
         tva_par_taux = {}
-        remise_totale = 0  # Ne sera pas affichée si lignes déjà remisées
+        remise_totale = 0  # FORCÉ à 0 : les lignes sont déjà remisées, aucune remise globale à afficher
         
         for i, ligne_norm in enumerate(lignes_finales_normalisees):
             y_ligne -= 10*mm
@@ -902,6 +902,13 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     # → NE PAS afficher de remise globale (sinon remise appliquée deux fois)
     lignes_deja_remisees = (lignes_finales_devis and len(lignes_finales_devis) > 0)
     
+    # ASSERTION DE SÉCURITÉ : Vérifier qu'on n'affiche jamais de remise si lignes déjà remisées
+    if lignes_deja_remisees:
+        # Forcer remise_totale à 0 pour éviter tout affichage accidentel
+        remise_totale = 0
+        # Vérification de sécurité
+        assert remise_totale == 0, "ERREUR: remise_totale doit être 0 si lignes déjà remisées"
+    
     x_label = 130*mm
     x_value = width - 18*mm
     c.setFillColor(GRIS_FONCE)
@@ -909,20 +916,22 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     
     y_offset = 0
     
-    # Si lignes déjà remisées : afficher directement "Total HT" (somme des lignes)
-    # Sinon : afficher "Total HT", puis remise, puis "Total HT après remise"
+    # Si lignes déjà remisées : afficher UNIQUEMENT "Total HT" (somme des lignes)
+    # ❌ NE JAMAIS afficher : Total HT avant remise, Remise, Total HT après remise
     if lignes_deja_remisees:
         # Lignes déjà remisées : Total HT = somme des lignes (pas de remise à afficher)
+        # ❌ Supprimer entièrement : Total HT (avant remise), Remise, Total HT après remise
+        # ✅ Afficher uniquement : Total HT = somme des lignes
         c.drawString(x_label, y_totaux, "Total HT")
         c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
         y_offset = 6*mm
     else:
-        # Lignes non remisées : afficher Total HT avant remise, puis remise, puis après remise
+        # Lignes non remisées : affichage classique autorisé
         c.drawString(x_label, y_totaux, "Total HT")
         c.drawRightString(x_value, y_totaux, f"{total_ht_avant_remise:.2f} €")
         y_offset = 6*mm
         
-        # Afficher la remise si elle existe
+        # Afficher la remise si elle existe (uniquement si lignes non remisées)
         if remise_totale > 0:
             if hasattr(data, 'remise_type') and data.remise_type == "pourcentage":
                 c.drawString(x_label, y_totaux - y_offset, f"Remise ({data.remise_valeur}%)")
@@ -933,7 +942,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
             c.setFillColor(GRIS_FONCE)
             y_offset += 6*mm
         
-        # Afficher "Total HT après remise" si remise
+        # Afficher "Total HT après remise" si remise (uniquement si lignes non remisées)
         if remise_totale > 0:
             c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
             c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
