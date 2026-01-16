@@ -1173,11 +1173,24 @@ def calculer_lignes_devis_fige_strict(data):
     """
     MODE "DEVIS FIGÉ" STRICT - Source unique de vérité absolue
     
-    RÈGLE ABSOLUE : Les lignes du devis sont la SOURCE UNIQUE DE VÉRITÉ
-    AUCUN recalcul de ligne n'est autorisé.
+    RÈGLE MAÎTRE : Un devis accepté devient une source comptable IMMUTABLE.
+    La facture finale doit être une copie exacte du devis accepté.
+    
+    Si document_source == "devis_accepté" :
+    - INTERDICTION de modifier les lignes
+    - INTERDICTION de recalculer la TVA
+    - INTERDICTION de fusionner ou normaliser
+    - INTERDICTION de corriger unité / taux / description
     
     Cette fonction bypass complètement calculer_lignes_finales pour les devis figés.
     Elle utilise DIRECTEMENT les champs figés du devis sans aucun traitement.
+    
+    Toute logique de :
+    - normalisation
+    - fusion
+    - recalcul TVA
+    - redistribution
+    est STRICTEMENT DÉSACTIVÉE dès qu'un devis est accepté.
     
     Retourne :
     - lignes_normalisees : lignes du devis utilisées telles quelles
@@ -1186,32 +1199,55 @@ def calculer_lignes_devis_fige_strict(data):
     - total_ttc : total_ht + total_tva
     - tva_par_taux : dictionnaire {taux: montant_tva} calculé à partir des lignes
     - net_a_payer_ttc : total_ttc - acompte_ttc_deja_facture (si acompte)
+    - immutable_source : True (flag indiquant que la source est immuable)
     """
     lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
     acompte_ttc_deja_facture = getattr(data, 'acompte_ttc_deja_facture', 0) or 0
     is_facture_acompte = getattr(data, 'is_facture_acompte', False)
     taux_acompte = getattr(data, 'taux_acompte', None)
     
+    # Flag immutable_source = true
+    immutable_source = True
+    
     if not lignes_finales_devis or len(lignes_finales_devis) == 0:
         raise ValueError("ERREUR: calculer_lignes_devis_fige_strict appelé sans lignes_finales_devis")
+    
+    # Log : Mode devis figé activé
+    print(f"🔒 MODE DEVIS FIGÉ STRICT ACTIVÉ - Source immuable (immutable_source={immutable_source})")
+    print(f"   Nombre de lignes du devis: {len(lignes_finales_devis)}")
+    print(f"   Toute modification est INTERDITE")
     
     # ============================================================
     # UTILISER DIRECTEMENT LES CHAMPS FIGÉS DU DEVIS
     # ============================================================
+    # RÈGLE MAÎTRE : Si document_source == "devis_accepté"
+    # - INTERDICTION de modifier les lignes
+    # - INTERDICTION de recalculer la TVA
+    # - INTERDICTION de fusionner ou normaliser
+    # - INTERDICTION de corriger unité / taux / description
+    
     # NE PAS appeler calculer_lignes_finales
     # NE PAS normaliser les descriptions
     # NE PAS fusionner les lignes
     # NE PAS recalculer les quantités
     # NE PAS recalculer les prix unitaires
     # NE PAS recalculer les taux de TVA
-    # NE PAS recalculer les HT ligne
+    # NE PAS recalculer les HT ligne (sauf pour facture d'acompte proportionnelle)
     
     lignes_normalisees = []
     tva_par_taux = {}
     
-    for ligne_devis in lignes_finales_devis:
+    for i, ligne_devis in enumerate(lignes_finales_devis):
         # Utiliser DIRECTEMENT les champs figés du devis
         # Les valeurs sont DÉFINITIVES et ne doivent JAMAIS être recalculées
+        
+        # Chaque ligne garde EXACTEMENT :
+        # - description
+        # - quantité
+        # - unité
+        # - PU HT (calculé à partir de ht_ligne / quantite)
+        # - taux TVA
+        # - HT ligne
         
         # Calculer tva_ligne à partir des champs figés
         # Note: Si le devis a déjà tva_ligne calculé, on peut l'utiliser
@@ -1224,10 +1260,13 @@ def calculer_lignes_devis_fige_strict(data):
         prix_unitaire_ht = ht_ligne / ligne_devis.quantite if ligne_devis.quantite > 0 else 0
         
         # Cas facture d'acompte : appliquer le taux d'acompte proportionnellement
+        # (C'est la SEULE exception autorisée : calcul proportionnel pour acompte)
         if is_facture_acompte and taux_acompte is not None and taux_acompte > 0:
+            ht_ligne_original = ht_ligne
             ht_ligne = ht_ligne * (taux_acompte / 100)
-            tva_ligne = ht_ligne * (tva_taux / 100)
+            tva_ligne = ht_ligne * (tva_taux / 100)  # TVA recalculée proportionnellement
             prix_unitaire_ht = ht_ligne / ligne_devis.quantite if ligne_devis.quantite > 0 else 0
+            print(f"   Ligne {i+1}: Acompte {taux_acompte}% appliqué (HT: {ht_ligne_original:.2f} → {ht_ligne:.2f})")
         
         lignes_normalisees.append({
             'description': ligne_devis.description,      # Description EXACTE (pas de normalisation)
@@ -1248,22 +1287,35 @@ def calculer_lignes_devis_fige_strict(data):
     # ============================================================
     # CALCUL DES TOTAUX (seule chose autorisée)
     # ============================================================
-    # total_ht = somme(ht_ligne)
-    # total_tva = somme(tva_ligne)
+    # Les totaux sont calculés UNIQUEMENT comme :
+    # total_ht = somme(ht_lignes)
+    # total_tva = somme(tva_lignes)
     # total_ttc = total_ht + total_tva
+    # Aucune autre logique n'est autorisée
     
     total_ht_final = sum(ligne['ht_final'] for ligne in lignes_normalisees)
     total_tva = sum(ligne['tva_ligne'] for ligne in lignes_normalisees)
     total_ttc = total_ht_final + total_tva
     
+    print(f"   Totaux calculés (somme des lignes uniquement):")
+    print(f"     Total HT: {total_ht_final:.2f} €")
+    print(f"     Total TVA: {total_tva:.2f} €")
+    print(f"     Total TTC: {total_ttc:.2f} €")
+    
     # ============================================================
     # CAS FACTURE FINALE AVEC ACOMPTE
     # ============================================================
-    # NE PAS recalculer la TVA
-    # net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+    # Si une facture d'acompte existe :
+    # - L'acompte est soustrait UNIQUEMENT au TOTAL TTC
+    # - Aucune modification des lignes
+    # - net_a_payer_ttc = total_ttc - acompte_ttc
+    # - NE PAS recalculer la TVA
+    # - NE PAS répartir l'acompte en HT/TVA
     
     if not is_facture_acompte and acompte_ttc_deja_facture > 0:
         net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+        print(f"   Acompte TTC déjà facturé: {acompte_ttc_deja_facture:.2f} €")
+        print(f"   Net à payer TTC: {net_a_payer_ttc:.2f} € (Total TTC - Acompte TTC)")
         if net_a_payer_ttc < 0:
             raise ValueError(
                 f"ERREUR VALIDATION ACOMPTE: "
@@ -1278,21 +1330,67 @@ def calculer_lignes_devis_fige_strict(data):
     # ============================================================
     # assert lignes_facture == lignes_devis (structure et valeurs)
     # sinon lever une erreur bloquante
+    # Logs si tentative de modification bloquée
     
     assert len(lignes_normalisees) == len(lignes_finales_devis), \
-        f"ERREUR CRITIQUE: Nombre de lignes différent ({len(lignes_normalisees)} vs {len(lignes_finales_devis)})"
+        f"❌ ERREUR CRITIQUE: Nombre de lignes différent ({len(lignes_normalisees)} vs {len(lignes_finales_devis)})"
     
     for i, (ligne_facture, ligne_devis) in enumerate(zip(lignes_normalisees, lignes_finales_devis)):
-        assert ligne_facture['description'] == ligne_devis.description, \
-            f"ERREUR CRITIQUE ligne {i+1}: Description modifiée"
-        assert ligne_facture['quantite'] == ligne_devis.quantite, \
-            f"ERREUR CRITIQUE ligne {i+1}: Quantité modifiée"
-        assert ligne_facture['unite'] == ligne_devis.unite, \
-            f"ERREUR CRITIQUE ligne {i+1}: Unité modifiée"
-        assert abs(ligne_facture['ht_final'] - ligne_devis.ht_apres_remise) < 0.01 or (is_facture_acompte and taux_acompte), \
-            f"ERREUR CRITIQUE ligne {i+1}: HT modifié (facture: {ligne_facture['ht_final']:.2f}, devis: {ligne_devis.ht_apres_remise:.2f})"
-        assert abs(ligne_facture['tva_taux'] - ligne_devis.tva_taux) < 0.01, \
-            f"ERREUR CRITIQUE ligne {i+1}: TVA modifiée (facture: {ligne_facture['tva_taux']:.2f}%, devis: {ligne_devis.tva_taux:.2f}%)"
+        # Vérifier description
+        if ligne_facture['description'] != ligne_devis.description:
+            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: Description modifiée")
+            print(f"   Devis: '{ligne_devis.description}'")
+            print(f"   Facture: '{ligne_facture['description']}'")
+            raise ValueError(
+                f"ERREUR CRITIQUE ligne {i+1}: Description modifiée. "
+                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
+            )
+        
+        # Vérifier quantité
+        if ligne_facture['quantite'] != ligne_devis.quantite:
+            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: Quantité modifiée")
+            print(f"   Devis: {ligne_devis.quantite}")
+            print(f"   Facture: {ligne_facture['quantite']}")
+            raise ValueError(
+                f"ERREUR CRITIQUE ligne {i+1}: Quantité modifiée. "
+                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
+            )
+        
+        # Vérifier unité
+        if ligne_facture['unite'] != ligne_devis.unite:
+            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: Unité modifiée")
+            print(f"   Devis: '{ligne_devis.unite}'")
+            print(f"   Facture: '{ligne_facture['unite']}'")
+            raise ValueError(
+                f"ERREUR CRITIQUE ligne {i+1}: Unité modifiée. "
+                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
+            )
+        
+        # Vérifier HT (tolérance pour facture d'acompte)
+        if not (is_facture_acompte and taux_acompte):
+            if abs(ligne_facture['ht_final'] - ligne_devis.ht_apres_remise) >= 0.01:
+                print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: HT modifié")
+                print(f"   Devis: {ligne_devis.ht_apres_remise:.2f} €")
+                print(f"   Facture: {ligne_facture['ht_final']:.2f} €")
+                raise ValueError(
+                    f"ERREUR CRITIQUE ligne {i+1}: HT modifié. "
+                    f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
+                )
+        
+        # Vérifier TVA
+        if abs(ligne_facture['tva_taux'] - ligne_devis.tva_taux) >= 0.01:
+            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: TVA modifiée")
+            print(f"   Devis: {ligne_devis.tva_taux:.2f}%")
+            print(f"   Facture: {ligne_facture['tva_taux']:.2f}%")
+            raise ValueError(
+                f"ERREUR CRITIQUE ligne {i+1}: TVA modifiée. "
+                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
+            )
+    
+    print(f"✅ Validation OK: Toutes les lignes correspondent exactement au devis accepté")
+    
+    # OBJECTIF FINAL : Même devis accepté → même facture → mêmes totaux → toujours.
+    print(f"✅ MODE DEVIS FIGÉ STRICT TERMINÉ - Source immuable respectée")
     
     return {
         'lignes_normalisees': lignes_normalisees,
@@ -1305,6 +1403,7 @@ def calculer_lignes_devis_fige_strict(data):
         'acompte_ttc_deja_facture': acompte_ttc_deja_facture,
         'is_facture_acompte': is_facture_acompte,
         'devis_fige': True,
+        'immutable_source': immutable_source,  # Flag indiquant que la source est immuable
         'warnings': []  # Pas de warnings pour devis figé
     }
 
