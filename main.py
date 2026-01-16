@@ -689,21 +689,21 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
         total_ligne_ht_remise = total_ligne_ht - remise_ligne
         total_ht_apres_remise += total_ligne_ht_remise
         
-            # 4. Calculer la TVA sur le HT remisé
-            # RÈGLE FISCALE : Toujours utiliser le taux du devis (source unique de vérité)
-            # Si prestation.tva_taux est défini, l'utiliser (taux spécifique de la ligne)
-            # Sinon, utiliser tva_taux_global (taux du devis)
-            # JAMAIS utiliser de taux par défaut arbitraire
-            if prestation.tva_taux is not None:
-                tva_taux_ligne = prestation.tva_taux
-            else:
-                # Utiliser le taux global du devis (doit être défini)
-                if tva_taux_global is None:
-                    raise ValueError(f"Taux TVA manquant pour la prestation '{prestation.description}'. Le taux doit être défini soit sur la prestation, soit globalement dans le devis.")
-                tva_taux_ligne = tva_taux_global
-            
-            montant_tva_ligne = total_ligne_ht_remise * (tva_taux_ligne / 100)
-            tva_par_taux[tva_taux_ligne] = tva_par_taux.get(tva_taux_ligne, 0) + montant_tva_ligne
+        # 4. Calculer la TVA sur le HT remisé
+        # RÈGLE FISCALE : Toujours utiliser le taux du devis (source unique de vérité)
+        # Si prestation.tva_taux est défini, l'utiliser (taux spécifique de la ligne)
+        # Sinon, utiliser tva_taux_global (taux du devis)
+        # JAMAIS utiliser de taux par défaut arbitraire
+        if prestation.tva_taux is not None:
+            tva_taux_ligne = prestation.tva_taux
+        else:
+            # Utiliser le taux global du devis (doit être défini)
+            if tva_taux_global is None:
+                raise ValueError(f"Taux TVA manquant pour la prestation '{prestation.description}'. Le taux doit être défini soit sur la prestation, soit globalement dans le devis.")
+            tva_taux_ligne = tva_taux_global
+        
+        montant_tva_ligne = total_ligne_ht_remise * (tva_taux_ligne / 100)
+        tva_par_taux[tva_taux_ligne] = tva_par_taux.get(tva_taux_ligne, 0) + montant_tva_ligne
         
         # Alterner les couleurs de fond
         if i % 2 == 0:
