@@ -668,6 +668,11 @@ def calculer_lignes_finales(data, tva_taux_global):
     Calcule les lignes finales avec normalisation, fusion et remise.
     Cette fonction est la SOURCE UNIQUE de vérité pour tous les calculs.
     
+    RÈGLES DE FUSION STRICTES :
+    - Fusion uniquement si description normalisée + TVA + unité identiques
+    - Si description identique mais TVA ou unité différente → lignes distinctes (warning)
+    - Le moteur ne corrige pas les erreurs de saisie métier, il reflète strictement les données
+    
     Retourne :
     - lignes_normalisees : liste des lignes finales (après normalisation/fusion/remise)
     - total_ht_initial : somme des HT avant remise
@@ -676,6 +681,7 @@ def calculer_lignes_finales(data, tva_taux_global):
     - total_tva : somme des TVA
     - total_ttc : total HT + total TVA
     - lignes_deja_remisees : booléen indiquant si les lignes sont déjà remisées
+    - warnings : liste des warnings de cohérence métier (prestations similaires avec TVA/unité différentes)
     """
     # Récupérer les paramètres
     acompte_ttc_deja_facture = getattr(data, 'acompte_ttc_deja_facture', 0) or 0
@@ -753,29 +759,52 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 2 : NORMALISATION ET FUSION (AVANT tout calcul)
     # ============================================================
     
-    descriptions_vues = {}
+    # RÈGLE STRICTE : Fusion uniquement si description + TVA + unité identiques
+    # Clé de fusion : (description_norm, tva_taux, unite)
+    cles_fusion = {}  # {(desc_norm, tva_taux, unite): index}
     lignes_normalisees = []
+    warnings = []  # Liste des warnings de cohérence métier
     
     for ligne in lignes_finales:
         desc_norm = ligne['description'].strip().lower()
+        tva_taux = ligne['tva_taux']
+        unite = ligne['unite']
         
-        if desc_norm in descriptions_vues:
-            # Fusionner avec ligne existante
-            index = descriptions_vues[desc_norm]
+        # Clé de fusion : description + TVA + unité
+        cle_fusion = (desc_norm, tva_taux, unite)
+        
+        if cle_fusion in cles_fusion:
+            # Fusionner avec ligne existante (description + TVA + unité identiques)
+            index = cles_fusion[cle_fusion]
             ligne_existante = lignes_normalisees[index]
-            
-            # Vérifier taux TVA identique
-            if ligne_existante['tva_taux'] != ligne['tva_taux']:
-                raise ValueError(f"Conflit TVA pour '{ligne['description']}': {ligne_existante['tva_taux']}% vs {ligne['tva_taux']}%")
             
             # Fusionner : additionner quantités et HT
             ligne_existante['quantite'] += ligne['quantite']
             ligne_existante['ht_final'] += ligne['ht_final']
             ligne_existante['ht_initial'] += ligne['ht_initial']
         else:
-            # Nouvelle ligne
-            descriptions_vues[desc_norm] = len(lignes_normalisees)
+            # Vérifier si description identique mais TVA ou unité différente (warning)
+            desc_similaire = False
+            for (desc_existante, tva_existante, unite_existante), index_existant in cles_fusion.items():
+                if desc_existante == desc_norm and (tva_existante != tva_taux or unite_existante != unite):
+                    desc_similaire = True
+                    ligne_existante = lignes_normalisees[index_existant]
+                    warnings.append(
+                        f"Prestations similaires '{ligne['description']}' avec TVA/unité différentes : "
+                        f"TVA {tva_existante}%/{unite_existante} vs TVA {tva_taux}%/{unite} - "
+                        f"Lignes conservées distinctes"
+                    )
+                    break
+            
+            # Nouvelle ligne (description + TVA + unité unique)
+            cles_fusion[cle_fusion] = len(lignes_normalisees)
             lignes_normalisees.append(ligne.copy())
+    
+    # Afficher les warnings si présents
+    if warnings:
+        print("⚠️ WARNINGS DE COHÉRENCE MÉTIER:")
+        for warning in warnings:
+            print(f"  - {warning}")
     
     # ============================================================
     # ÉTAPE 3 : APPLIQUER ACOMPTE SI FACTURE D'ACOMPTE
@@ -832,7 +861,8 @@ def calculer_lignes_finales(data, tva_taux_global):
         'total_ttc': total_ttc,
         'lignes_deja_remisees': lignes_deja_remisees,
         'acompte_ttc_deja_facture': acompte_ttc_deja_facture,
-        'is_facture_acompte': is_facture_acompte
+        'is_facture_acompte': is_facture_acompte,
+        'warnings': warnings  # Warnings de cohérence métier (pas d'erreur, juste information)
     }
 
 
