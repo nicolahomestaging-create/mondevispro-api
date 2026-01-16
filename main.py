@@ -775,20 +775,28 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 1 : CONSTRUIRE LES LIGNES FINALES (source de vérité)
     # ============================================================
     
+    # Détecter si c'est un devis figé (facture issue d'un devis)
+    devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
+    
     lignes_finales = []  # Liste des lignes finales à afficher
     
-    if lignes_finales_devis and len(lignes_finales_devis) > 0:
-        # CAS A : Lignes déjà remisées (venant du devis)
-        # → Utiliser directement, normaliser et fusionner
+    if devis_fige:
+        # CAS A : DEVIS FIGÉ - Facture issue d'un devis
+        # RÈGLE ABSOLUE : Utiliser DIRECTEMENT les lignes du devis
+        # → AUCUNE normalisation
+        # → AUCUNE fusion
+        # → AUCUN recalcul
+        # → Les lignes sont utilisées telles quelles (miroir exact du devis)
         for ligne in lignes_finales_devis:
             lignes_finales.append({
-                'description': ligne.description,
+                'description': ligne.description,  # Description originale (pas de normalisation)
                 'quantite': ligne.quantite,
                 'unite': ligne.unite,
                 'ht_initial': ligne.ht_apres_remise,  # Déjà remisé
-                'ht_final': ligne.ht_apres_remise,    # Déjà remisé
-                'tva_taux': ligne.tva_taux,
-                'deja_remise': True
+                'ht_final': ligne.ht_apres_remise,    # Déjà remisé (FIGÉ)
+                'tva_taux': ligne.tva_taux,           # TVA FIGÉE (ne jamais modifier)
+                'deja_remise': True,
+                'devis_fige': True  # Flag pour bypasser toute logique de fusion
             })
     else:
         # CAS B : Lignes non remisées (calcul normal)
@@ -841,58 +849,71 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 2 : NORMALISATION ET FUSION (AVANT tout calcul)
     # ============================================================
     
-    # RÈGLE STRICTE : Fusion uniquement si description + TVA + unité identiques
-    # Clé de fusion : (description_norm, tva_taux, unite)
-    cles_fusion = {}  # {(desc_norm, tva_taux, unite): index}
-    lignes_normalisees = []
-    warnings = []  # Liste des warnings de cohérence métier
-    
-    for ligne in lignes_finales:
-        desc_norm = ligne['description'].strip().lower()
-        tva_taux = ligne['tva_taux']
-        unite = ligne['unite']
+    # RÈGLE ABSOLUE : Si devis figé → AUCUNE normalisation, AUCUNE fusion
+    if devis_fige:
+        # DEVIS FIGÉ : Utiliser les lignes telles quelles (miroir exact)
+        # → Pas de normalisation (garder description originale)
+        # → Pas de fusion (garder toutes les lignes distinctes)
+        # → Les lignes sont déjà figées dans le devis
+        lignes_normalisees = lignes_finales.copy()  # Copie directe, aucune modification
+        warnings = []  # Pas de warnings pour devis figé (les lignes sont déjà validées)
+    else:
+        # CAS NORMAL : Normalisation et fusion autorisées
+        # RÈGLE STRICTE : Fusion uniquement si description + TVA + unité identiques
+        # Clé de fusion : (description_norm, tva_taux, unite)
+        cles_fusion = {}  # {(desc_norm, tva_taux, unite): index}
+        lignes_normalisees = []
+        warnings = []  # Liste des warnings de cohérence métier
         
-        # Clé de fusion : description + TVA + unité
-        cle_fusion = (desc_norm, tva_taux, unite)
+        for ligne in lignes_finales:
+            desc_norm = ligne['description'].strip().lower()
+            tva_taux = ligne['tva_taux']
+            unite = ligne['unite']
+            
+            # Clé de fusion : description + TVA + unité
+            cle_fusion = (desc_norm, tva_taux, unite)
+            
+            if cle_fusion in cles_fusion:
+                # Fusionner avec ligne existante (description + TVA + unité identiques)
+                index = cles_fusion[cle_fusion]
+                ligne_existante = lignes_normalisees[index]
+                
+                # Fusionner : additionner quantités et HT
+                ligne_existante['quantite'] += ligne['quantite']
+                ligne_existante['ht_final'] += ligne['ht_final']
+                ligne_existante['ht_initial'] += ligne['ht_initial']
+            else:
+                # Vérifier si description identique mais TVA ou unité différente (warning)
+                desc_similaire = False
+                for (desc_existante, tva_existante, unite_existante), index_existant in cles_fusion.items():
+                    if desc_existante == desc_norm and (tva_existante != tva_taux or unite_existante != unite):
+                        desc_similaire = True
+                        ligne_existante = lignes_normalisees[index_existant]
+                        warnings.append(
+                            f"Prestations similaires '{ligne['description']}' avec TVA/unité différentes : "
+                            f"TVA {tva_existante}%/{unite_existante} vs TVA {tva_taux}%/{unite} - "
+                            f"Lignes conservées distinctes"
+                        )
+                        break
+                
+                # Nouvelle ligne (description + TVA + unité unique)
+                cles_fusion[cle_fusion] = len(lignes_normalisees)
+                lignes_normalisees.append(ligne.copy())
         
-        if cle_fusion in cles_fusion:
-            # Fusionner avec ligne existante (description + TVA + unité identiques)
-            index = cles_fusion[cle_fusion]
-            ligne_existante = lignes_normalisees[index]
-            
-            # Fusionner : additionner quantités et HT
-            ligne_existante['quantite'] += ligne['quantite']
-            ligne_existante['ht_final'] += ligne['ht_final']
-            ligne_existante['ht_initial'] += ligne['ht_initial']
-        else:
-            # Vérifier si description identique mais TVA ou unité différente (warning)
-            desc_similaire = False
-            for (desc_existante, tva_existante, unite_existante), index_existant in cles_fusion.items():
-                if desc_existante == desc_norm and (tva_existante != tva_taux or unite_existante != unite):
-                    desc_similaire = True
-                    ligne_existante = lignes_normalisees[index_existant]
-                    warnings.append(
-                        f"Prestations similaires '{ligne['description']}' avec TVA/unité différentes : "
-                        f"TVA {tva_existante}%/{unite_existante} vs TVA {tva_taux}%/{unite} - "
-                        f"Lignes conservées distinctes"
-                    )
-                    break
-            
-            # Nouvelle ligne (description + TVA + unité unique)
-            cles_fusion[cle_fusion] = len(lignes_normalisees)
-            lignes_normalisees.append(ligne.copy())
-    
-    # Afficher les warnings si présents
-    if warnings:
-        print("⚠️ WARNINGS DE COHÉRENCE MÉTIER:")
-        for warning in warnings:
-            print(f"  - {warning}")
+        # Afficher les warnings si présents
+        if warnings:
+            print("⚠️ WARNINGS DE COHÉRENCE MÉTIER:")
+            for warning in warnings:
+                print(f"  - {warning}")
     
     # ============================================================
     # ÉTAPE 3 : APPLIQUER ACOMPTE SI FACTURE D'ACOMPTE
     # ============================================================
     
+    # RÈGLE : L'acompte ne s'applique QUE pour les factures d'acompte
+    # Pour les factures finales issues d'un devis figé, on déduit l'acompte TTC après
     if is_facture_acompte and taux_acompte is not None and taux_acompte > 0:
+        # Facture d'acompte : calculer l'acompte proportionnellement sur chaque ligne
         for ligne in lignes_normalisees:
             ligne['ht_final'] = ligne['ht_final'] * (taux_acompte / 100)
     
@@ -900,8 +921,11 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 4 : CALCULER TVA LIGNE PAR LIGNE (source de vérité)
     # ============================================================
     
+    # RÈGLE ABSOLUE : Pour devis figé, la TVA est déjà figée dans chaque ligne
+    # → Utiliser directement le taux TVA de chaque ligne (pas de recalcul)
     tva_par_taux = {}
     for ligne in lignes_normalisees:
+        # TVA = ht_final × tva_taux (taux déjà figé pour devis figé)
         tva_ligne = ligne['ht_final'] * (ligne['tva_taux'] / 100)
         tva_par_taux[ligne['tva_taux']] = tva_par_taux.get(ligne['tva_taux'], 0) + tva_ligne
     
