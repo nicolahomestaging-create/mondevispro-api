@@ -778,25 +778,36 @@ def calculer_lignes_finales(data, tva_taux_global):
     # Détecter si c'est un devis figé (facture issue d'un devis)
     devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
     
+    # RÈGLE ABSOLUE : Si devis figé, IGNORER complètement les prestations du FactureRequest
+    # Le devis figé est la source unique de vérité, aucune autre source n'est autorisée
+    if devis_fige:
+        # Vérifier qu'on n'essaie pas d'utiliser des prestations différentes
+        if hasattr(data, 'prestations') and data.prestations and len(data.prestations) > 0:
+            # La validation stricte a déjà été faite plus haut (ligne ~698)
+            # Si on arrive ici, c'est que les prestations sont identiques au devis
+            # → On les ignore quand même et on utilise uniquement lignes_finales_devis
+            pass
+    
     lignes_finales = []  # Liste des lignes finales à afficher
     
     if devis_fige:
         # CAS A : DEVIS FIGÉ - Facture issue d'un devis
-        # RÈGLE ABSOLUE : Utiliser DIRECTEMENT les lignes du devis
-        # → AUCUNE normalisation
-        # → AUCUNE fusion
-        # → AUCUN recalcul
-        # → Les lignes sont utilisées telles quelles (miroir exact du devis)
+        # RÈGLE ABSOLUE : Utiliser DIRECTEMENT les lignes du devis, telles quelles
+        # → AUCUNE normalisation (description conservée exactement)
+        # → AUCUNE fusion (toutes les lignes conservées distinctes)
+        # → AUCUN recalcul (HT, TVA, unité figés)
+        # → AUCUNE logique métier intelligente
+        # → Les lignes sont un miroir exact du devis figé
         for ligne in lignes_finales_devis:
             lignes_finales.append({
-                'description': ligne.description,  # Description originale (pas de normalisation)
-                'quantite': ligne.quantite,
-                'unite': ligne.unite,
-                'ht_initial': ligne.ht_apres_remise,  # Déjà remisé
-                'ht_final': ligne.ht_apres_remise,    # Déjà remisé (FIGÉ)
-                'tva_taux': ligne.tva_taux,           # TVA FIGÉE (ne jamais modifier)
+                'description': ligne.description,      # Description EXACTE (pas de strip/lower)
+                'quantite': ligne.quantite,            # Quantité FIGÉE
+                'unite': ligne.unite,                   # Unité FIGÉE
+                'ht_initial': ligne.ht_apres_remise,   # HT déjà remisé (FIGÉ)
+                'ht_final': ligne.ht_apres_remise,     # HT FIGÉ (ne jamais recalculer)
+                'tva_taux': ligne.tva_taux,            # TVA FIGÉE (ne jamais modifier)
                 'deja_remise': True,
-                'devis_fige': True  # Flag pour bypasser toute logique de fusion
+                'devis_fige': True  # Flag pour bypasser TOUTE logique de traitement
             })
     else:
         # CAS B : Lignes non remisées (calcul normal)
@@ -849,14 +860,48 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 2 : NORMALISATION ET FUSION (AVANT tout calcul)
     # ============================================================
     
-    # RÈGLE ABSOLUE : Si devis figé → AUCUNE normalisation, AUCUNE fusion
+    # RÈGLE ABSOLUE : Si devis figé → AUCUNE normalisation, AUCUNE fusion, AUCUN traitement
     if devis_fige:
-        # DEVIS FIGÉ : Utiliser les lignes telles quelles (miroir exact)
-        # → Pas de normalisation (garder description originale)
-        # → Pas de fusion (garder toutes les lignes distinctes)
-        # → Les lignes sont déjà figées dans le devis
-        lignes_normalisees = lignes_finales.copy()  # Copie directe, aucune modification
-        warnings = []  # Pas de warnings pour devis figé (les lignes sont déjà validées)
+        # DEVIS FIGÉ : Utiliser les lignes telles quelles (miroir exact du devis)
+        # → Pas de normalisation (description conservée exactement, pas de strip/lower)
+        # → Pas de fusion (toutes les lignes conservées distinctes, même si descriptions similaires)
+        # → Pas de traitement intelligent (les lignes sont immuables)
+        # → Les lignes sont déjà figées dans le devis, aucune modification autorisée
+        # → Aucune logique métier intelligente n'est autorisée sur un devis figé
+        lignes_normalisees = []
+        for i, ligne in enumerate(lignes_finales):
+            # Copie directe sans aucune modification
+            # ASSERTION : Les lignes doivent être identiques au devis
+            assert ligne.get('devis_fige', False), f"ERREUR: Ligne {i+1} devis figé sans flag devis_fige"
+            
+            # Vérifier que les valeurs correspondent exactement au devis
+            ligne_devis_originale = lignes_finales_devis[i]
+            assert ligne['description'] == ligne_devis_originale.description, \
+                f"ERREUR: Description modifiée ligne {i+1}"
+            assert ligne['quantite'] == ligne_devis_originale.quantite, \
+                f"ERREUR: Quantité modifiée ligne {i+1}"
+            assert ligne['unite'] == ligne_devis_originale.unite, \
+                f"ERREUR: Unité modifiée ligne {i+1}"
+            assert abs(ligne['ht_final'] - ligne_devis_originale.ht_apres_remise) < 0.01, \
+                f"ERREUR: HT modifié ligne {i+1}"
+            assert abs(ligne['tva_taux'] - ligne_devis_originale.tva_taux) < 0.01, \
+                f"ERREUR: TVA modifiée ligne {i+1}"
+            
+            lignes_normalisees.append({
+                'description': ligne['description'],  # EXACTEMENT comme dans le devis (pas de normalisation)
+                'quantite': ligne['quantite'],        # Quantité FIGÉE
+                'unite': ligne['unite'],              # Unité FIGÉE
+                'ht_initial': ligne['ht_initial'],    # HT initial FIGÉ
+                'ht_final': ligne['ht_final'],        # HT final FIGÉ (ne jamais recalculer)
+                'tva_taux': ligne['tva_taux'],        # TVA FIGÉE (ne jamais modifier)
+                'deja_remise': ligne['deja_remise'],
+                'devis_fige': True
+            })
+        warnings = []  # Pas de warnings pour devis figé (les lignes sont immuables)
+        
+        # ASSERTION DE SÉCURITÉ : Vérifier qu'on a bien le même nombre de lignes
+        assert len(lignes_normalisees) == len(lignes_finales_devis), \
+            f"ERREUR: Nombre de lignes différent ({len(lignes_normalisees)} vs {len(lignes_finales_devis)})"
     else:
         # CAS NORMAL : Normalisation et fusion autorisées
         # RÈGLE STRICTE : Fusion uniquement si description + TVA + unité identiques
@@ -911,21 +956,28 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ============================================================
     
     # RÈGLE : L'acompte ne s'applique QUE pour les factures d'acompte
-    # Pour les factures finales issues d'un devis figé, on déduit l'acompte TTC après
+    # Pour les factures finales issues d'un devis figé, on déduit l'acompte TTC après (étape 5)
+    # Les factures d'acompte sont des factures séparées qui ne modifient jamais les lignes du devis
     if is_facture_acompte and taux_acompte is not None and taux_acompte > 0:
         # Facture d'acompte : calculer l'acompte proportionnellement sur chaque ligne
+        # Note: Pour un devis figé, même l'acompte doit respecter les lignes du devis
         for ligne in lignes_normalisees:
+            # Calculer l'acompte sur le HT figé (proportionnellement)
             ligne['ht_final'] = ligne['ht_final'] * (taux_acompte / 100)
+            # La TVA sera recalculée sur ce HT d'acompte (étape 4)
     
     # ============================================================
     # ÉTAPE 4 : CALCULER TVA LIGNE PAR LIGNE (source de vérité)
     # ============================================================
     
-    # RÈGLE ABSOLUE : Pour devis figé, la TVA est déjà figée dans chaque ligne
-    # → Utiliser directement le taux TVA de chaque ligne (pas de recalcul)
+    # RÈGLE ABSOLUE : TVA calculée uniquement comme ht_final × tva_taux
+    # Pour devis figé : le taux TVA est FIGÉ dans chaque ligne, jamais modifié
+    # → Utiliser directement le taux TVA de chaque ligne (aucun recalcul de taux)
     tva_par_taux = {}
     for ligne in lignes_normalisees:
-        # TVA = ht_final × tva_taux (taux déjà figé pour devis figé)
+        # TVA = ht_final × tva_taux
+        # Pour devis figé : tva_taux est déjà figé, ht_final est déjà figé
+        # → Le calcul est déterministe et reproductible
         tva_ligne = ligne['ht_final'] * (ligne['tva_taux'] / 100)
         tva_par_taux[ligne['tva_taux']] = tva_par_taux.get(ligne['tva_taux'], 0) + tva_ligne
     
@@ -933,10 +985,19 @@ def calculer_lignes_finales(data, tva_taux_global):
     # ÉTAPE 5 : CALCULER LES TOTAUX (somme des lignes uniquement)
     # ============================================================
     
+    # RÈGLE ABSOLUE : Les totaux sont UNIQUEMENT la somme des lignes
+    # → Total HT = somme des HT des lignes
+    # → TVA = somme des TVA calculées ligne par ligne
+    # → Total TTC = Total HT + TVA
+    # → Aucun recalcul global, aucun ajustement, aucune correction
     total_ht_initial = sum(ligne['ht_initial'] for ligne in lignes_normalisees)
     total_ht_final = sum(ligne['ht_final'] for ligne in lignes_normalisees)
-    total_tva = sum(tva_par_taux.values())
-    total_ttc = total_ht_final + total_tva
+    total_tva = sum(tva_par_taux.values())  # Somme des TVA par ligne
+    total_ttc = total_ht_final + total_tva  # Total TTC = HT + TVA
+    
+    # Pour facture finale issue d'un devis figé avec acompte :
+    # Net à payer TTC = Total TTC devis figé - somme des acomptes TTC déjà facturés
+    # La TVA n'est JAMAIS recalculée après déduction de l'acompte
     
     # Détecter si lignes déjà remisées
     lignes_deja_remisees = any(ligne.get('deja_remise', False) for ligne in lignes_normalisees)
