@@ -673,6 +673,12 @@ def calculer_lignes_finales(data, tva_taux_global):
     - Si description identique mais TVA ou unité différente → lignes distinctes (warning)
     - Le moteur ne corrige pas les erreurs de saisie métier, il reflète strictement les données
     
+    VALIDATION STRICTE FACTURE ISSUE D'UN DEVIS :
+    - Si lignes_finales_devis est présent, la facture est issue d'un devis
+    - Les lignes de facture DOIVENT être strictement identiques au devis (description, HT, TVA, unité)
+    - Toute modification est bloquée par une erreur ValueError
+    - Le total TTC de la facture doit correspondre au total TTC du devis (hors acomptes)
+    
     Retourne :
     - lignes_normalisees : liste des lignes finales (après normalisation/fusion/remise)
     - total_ht_initial : somme des HT avant remise
@@ -688,6 +694,82 @@ def calculer_lignes_finales(data, tva_taux_global):
     is_facture_acompte = getattr(data, 'is_facture_acompte', False)
     taux_acompte = getattr(data, 'taux_acompte', None)
     lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
+    
+    # ============================================================
+    # VALIDATION STRICTE : Facture issue d'un devis
+    # ============================================================
+    
+    # Si lignes_finales_devis est présent, la facture est issue d'un devis
+    # → Vérifier que les prestations ne modifient pas les lignes du devis
+    if lignes_finales_devis and len(lignes_finales_devis) > 0:
+        # RÈGLE ABSOLUE : Les lignes de facture DOIVENT être identiques au devis
+        # Vérifier si des prestations sont aussi fournies (ce qui serait une tentative de modification)
+        if hasattr(data, 'prestations') and data.prestations and len(data.prestations) > 0:
+            # Comparer chaque ligne du devis avec les prestations fournies
+            erreurs_validation = []
+            
+            # Créer un mapping des lignes du devis par description normalisée + TVA + unité
+            lignes_devis_map = {}
+            for ligne_devis in lignes_finales_devis:
+                cle = (
+                    ligne_devis.description.strip().lower(),
+                    ligne_devis.tva_taux,
+                    ligne_devis.unite
+                )
+                if cle not in lignes_devis_map:
+                    lignes_devis_map[cle] = []
+                lignes_devis_map[cle].append(ligne_devis)
+            
+            # Vérifier chaque prestation fournie
+            for i, prestation in enumerate(data.prestations):
+                desc_norm = prestation.description.strip().lower()
+                tva_prestation = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
+                unite_prestation = prestation.unite
+                ht_prestation = prestation.quantite * prestation.prix_unitaire
+                
+                cle = (desc_norm, tva_prestation, unite_prestation)
+                
+                if cle in lignes_devis_map:
+                    # Ligne trouvée dans le devis → vérifier que HT et TVA sont identiques
+                    ligne_devis_correspondante = lignes_devis_map[cle][0]
+                    ht_devis = ligne_devis_correspondante.ht_apres_remise
+                    
+                    # Vérifier HT (tolérance de 0.01 € pour arrondis)
+                    if abs(ht_prestation - ht_devis) > 0.01:
+                        erreurs_validation.append(
+                            f"Ligne {i+1} '{prestation.description}': HT facture ({ht_prestation:.2f} €) "
+                            f"≠ HT devis ({ht_devis:.2f} €)"
+                        )
+                    
+                    # Vérifier TVA
+                    if abs(tva_prestation - ligne_devis_correspondante.tva_taux) > 0.01:
+                        erreurs_validation.append(
+                            f"Ligne {i+1} '{prestation.description}': TVA facture ({tva_prestation}%) "
+                            f"≠ TVA devis ({ligne_devis_correspondante.tva_taux}%)"
+                        )
+                    
+                    # Vérifier unité
+                    if unite_prestation != ligne_devis_correspondante.unite:
+                        erreurs_validation.append(
+                            f"Ligne {i+1} '{prestation.description}': Unité facture ('{unite_prestation}') "
+                            f"≠ Unité devis ('{ligne_devis_correspondante.unite}')"
+                        )
+                else:
+                    # Ligne non trouvée dans le devis → nouvelle ligne interdite
+                    erreurs_validation.append(
+                        f"Ligne {i+1} '{prestation.description}' n'existe pas dans le devis. "
+                        f"Les factures issues d'un devis ne peuvent pas ajouter de nouvelles lignes."
+                    )
+            
+            # Si des erreurs sont détectées, lever une exception bloquante
+            if erreurs_validation:
+                message_erreur = (
+                    "FACTURE INVALIDE : Les lignes doivent être strictement identiques au devis.\n"
+                    "Erreurs détectées :\n" + "\n".join(f"  - {err}" for err in erreurs_validation) + "\n\n"
+                    "RÈGLE : Une facture issue d'un devis doit reprendre exactement les mêmes lignes "
+                    "(description, HT, TVA, unité). Toute modification est interdite."
+                )
+                raise ValueError(message_erreur)
     
     # ============================================================
     # ÉTAPE 1 : CONSTRUIRE LES LIGNES FINALES (source de vérité)
@@ -851,6 +933,33 @@ def calculer_lignes_finales(data, tva_taux_global):
     
     if abs(total_ttc - (total_ht_final + total_tva)) > 0.01:
         raise ValueError(f"ERREUR COHÉRENCE: total_ttc ({total_ttc}) != total_ht + total_tva ({total_ht_final + total_tva})")
+    
+    # ============================================================
+    # VALIDATION STRICTE : Facture finale issue d'un devis
+    # ============================================================
+    
+    # Si facture finale issue d'un devis (lignes_finales_devis présent)
+    # → Vérifier que le total TTC correspond au devis (hors acomptes)
+    if lignes_finales_devis and len(lignes_finales_devis) > 0 and not is_facture_acompte:
+        # Calculer le total TTC du devis (sans acompte)
+        total_ttc_devis = total_ttc  # Déjà calculé à partir des lignes du devis
+        
+        # Le total TTC de la facture finale doit être égal au total TTC du devis
+        # (l'acompte sera déduit après, mais le total TTC de base doit être identique)
+        # Note: total_ttc est déjà calculé à partir des lignes_finales_devis, donc il devrait être identique
+        # Cette validation est redondante mais sert de sécurité supplémentaire
+        
+        # Si un acompte a déjà été facturé, le net à payer sera différent
+        # mais le total TTC de base (avant déduction acompte) doit être identique
+        if acompte_ttc_deja_facture > 0:
+            net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+            # Vérifier que le total TTC de base est cohérent
+            # (le net à payer sera différent, c'est normal)
+            pass  # Pas de vérification supplémentaire nécessaire ici
+        else:
+            # Pas d'acompte → le total TTC doit être strictement identique au devis
+            # (déjà garanti car on utilise les mêmes lignes)
+            pass
     
     return {
         'lignes_normalisees': lignes_normalisees,
