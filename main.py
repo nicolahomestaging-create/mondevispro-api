@@ -1169,14 +1169,167 @@ def calculer_lignes_finales(data, tva_taux_global):
     }
 
 
+def calculer_lignes_devis_fige_strict(data):
+    """
+    MODE "DEVIS FIGÉ" STRICT - Source unique de vérité absolue
+    
+    RÈGLE ABSOLUE : Les lignes du devis sont la SOURCE UNIQUE DE VÉRITÉ
+    AUCUN recalcul de ligne n'est autorisé.
+    
+    Cette fonction bypass complètement calculer_lignes_finales pour les devis figés.
+    Elle utilise DIRECTEMENT les champs figés du devis sans aucun traitement.
+    
+    Retourne :
+    - lignes_normalisees : lignes du devis utilisées telles quelles
+    - total_ht_final : somme(ht_ligne) des lignes du devis
+    - total_tva : somme(tva_ligne) des lignes du devis
+    - total_ttc : total_ht + total_tva
+    - tva_par_taux : dictionnaire {taux: montant_tva} calculé à partir des lignes
+    - net_a_payer_ttc : total_ttc - acompte_ttc_deja_facture (si acompte)
+    """
+    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
+    acompte_ttc_deja_facture = getattr(data, 'acompte_ttc_deja_facture', 0) or 0
+    is_facture_acompte = getattr(data, 'is_facture_acompte', False)
+    taux_acompte = getattr(data, 'taux_acompte', None)
+    
+    if not lignes_finales_devis or len(lignes_finales_devis) == 0:
+        raise ValueError("ERREUR: calculer_lignes_devis_fige_strict appelé sans lignes_finales_devis")
+    
+    # ============================================================
+    # UTILISER DIRECTEMENT LES CHAMPS FIGÉS DU DEVIS
+    # ============================================================
+    # NE PAS appeler calculer_lignes_finales
+    # NE PAS normaliser les descriptions
+    # NE PAS fusionner les lignes
+    # NE PAS recalculer les quantités
+    # NE PAS recalculer les prix unitaires
+    # NE PAS recalculer les taux de TVA
+    # NE PAS recalculer les HT ligne
+    
+    lignes_normalisees = []
+    tva_par_taux = {}
+    
+    for ligne_devis in lignes_finales_devis:
+        # Utiliser DIRECTEMENT les champs figés du devis
+        # Les valeurs sont DÉFINITIVES et ne doivent JAMAIS être recalculées
+        
+        # Calculer tva_ligne à partir des champs figés
+        # Note: Si le devis a déjà tva_ligne calculé, on peut l'utiliser
+        # Sinon, on calcule: tva_ligne = ht_ligne × tva_taux / 100
+        ht_ligne = ligne_devis.ht_apres_remise
+        tva_taux = ligne_devis.tva_taux
+        tva_ligne = ht_ligne * (tva_taux / 100)
+        
+        # Calculer prix_unitaire_ht à partir de ht_ligne et quantite
+        prix_unitaire_ht = ht_ligne / ligne_devis.quantite if ligne_devis.quantite > 0 else 0
+        
+        # Cas facture d'acompte : appliquer le taux d'acompte proportionnellement
+        if is_facture_acompte and taux_acompte is not None and taux_acompte > 0:
+            ht_ligne = ht_ligne * (taux_acompte / 100)
+            tva_ligne = ht_ligne * (tva_taux / 100)
+            prix_unitaire_ht = ht_ligne / ligne_devis.quantite if ligne_devis.quantite > 0 else 0
+        
+        lignes_normalisees.append({
+            'description': ligne_devis.description,      # Description EXACTE (pas de normalisation)
+            'quantite': ligne_devis.quantite,            # Quantité FIGÉE
+            'unite': ligne_devis.unite,                   # Unité FIGÉE
+            'prix_unitaire_ht': prix_unitaire_ht,        # Calculé à partir de ht_ligne / quantite
+            'ht_initial': ligne_devis.ht_apres_remise,   # HT initial (avant acompte si facture d'acompte)
+            'ht_final': ht_ligne,                        # HT final (FIGÉ ou proportionnel si acompte)
+            'tva_taux': tva_taux,                        # TVA FIGÉE (ne jamais modifier)
+            'tva_ligne': tva_ligne,                      # TVA ligne (calculée à partir des champs figés)
+            'deja_remise': True,
+            'devis_fige': True
+        })
+        
+        # Grouper TVA par taux
+        tva_par_taux[tva_taux] = tva_par_taux.get(tva_taux, 0) + tva_ligne
+    
+    # ============================================================
+    # CALCUL DES TOTAUX (seule chose autorisée)
+    # ============================================================
+    # total_ht = somme(ht_ligne)
+    # total_tva = somme(tva_ligne)
+    # total_ttc = total_ht + total_tva
+    
+    total_ht_final = sum(ligne['ht_final'] for ligne in lignes_normalisees)
+    total_tva = sum(ligne['tva_ligne'] for ligne in lignes_normalisees)
+    total_ttc = total_ht_final + total_tva
+    
+    # ============================================================
+    # CAS FACTURE FINALE AVEC ACOMPTE
+    # ============================================================
+    # NE PAS recalculer la TVA
+    # net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+    
+    if not is_facture_acompte and acompte_ttc_deja_facture > 0:
+        net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+        if net_a_payer_ttc < 0:
+            raise ValueError(
+                f"ERREUR VALIDATION ACOMPTE: "
+                f"Net à payer TTC ({net_a_payer_ttc:.2f} €) < 0. "
+                f"L'acompte TTC ({acompte_ttc_deja_facture:.2f} €) dépasse le total TTC ({total_ttc:.2f} €)."
+            )
+    else:
+        net_a_payer_ttc = total_ttc
+    
+    # ============================================================
+    # PROTECTION DURE : Vérifier que les lignes correspondent au devis
+    # ============================================================
+    # assert lignes_facture == lignes_devis (structure et valeurs)
+    # sinon lever une erreur bloquante
+    
+    assert len(lignes_normalisees) == len(lignes_finales_devis), \
+        f"ERREUR CRITIQUE: Nombre de lignes différent ({len(lignes_normalisees)} vs {len(lignes_finales_devis)})"
+    
+    for i, (ligne_facture, ligne_devis) in enumerate(zip(lignes_normalisees, lignes_finales_devis)):
+        assert ligne_facture['description'] == ligne_devis.description, \
+            f"ERREUR CRITIQUE ligne {i+1}: Description modifiée"
+        assert ligne_facture['quantite'] == ligne_devis.quantite, \
+            f"ERREUR CRITIQUE ligne {i+1}: Quantité modifiée"
+        assert ligne_facture['unite'] == ligne_devis.unite, \
+            f"ERREUR CRITIQUE ligne {i+1}: Unité modifiée"
+        assert abs(ligne_facture['ht_final'] - ligne_devis.ht_apres_remise) < 0.01 or (is_facture_acompte and taux_acompte), \
+            f"ERREUR CRITIQUE ligne {i+1}: HT modifié (facture: {ligne_facture['ht_final']:.2f}, devis: {ligne_devis.ht_apres_remise:.2f})"
+        assert abs(ligne_facture['tva_taux'] - ligne_devis.tva_taux) < 0.01, \
+            f"ERREUR CRITIQUE ligne {i+1}: TVA modifiée (facture: {ligne_facture['tva_taux']:.2f}%, devis: {ligne_devis.tva_taux:.2f}%)"
+    
+    return {
+        'lignes_normalisees': lignes_normalisees,
+        'total_ht_initial': total_ht_final,  # Pour devis figé, ht_initial = ht_final (déjà remisé)
+        'total_ht_final': total_ht_final,
+        'tva_par_taux': tva_par_taux,
+        'total_tva': total_tva,
+        'total_ttc': total_ttc,
+        'lignes_deja_remisees': True,
+        'acompte_ttc_deja_facture': acompte_ttc_deja_facture,
+        'is_facture_acompte': is_facture_acompte,
+        'devis_fige': True,
+        'warnings': []  # Pas de warnings pour devis figé
+    }
+
+
 def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     """
     Dessine le tableau des prestations pour une facture avec totaux - TVA par ligne
     
-    Utilise calculer_lignes_finales comme source unique de vérité.
+    MODE "DEVIS FIGÉ" STRICT :
+    Si devis_fige == True, utilise calculer_lignes_devis_fige_strict au lieu de calculer_lignes_finales.
     """
-    # Calculer les lignes finales (source unique de vérité)
-    resultats = calculer_lignes_finales(data, tva_taux_global)
+    # Détecter si c'est un devis figé
+    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
+    devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
+    
+    # ============================================================
+    # BRANCHE EXPLICITE : MODE "DEVIS FIGÉ" STRICT
+    # ============================================================
+    if devis_fige:
+        # NE PAS appeler calculer_lignes_finales
+        # Utiliser directement calculer_lignes_devis_fige_strict
+        resultats = calculer_lignes_devis_fige_strict(data)
+    else:
+        # Cas normal : utiliser calculer_lignes_finales
+        resultats = calculer_lignes_finales(data, tva_taux_global)
     
     lignes_normalisees = resultats['lignes_normalisees']
     total_ht_initial = resultats['total_ht_initial']
@@ -1378,9 +1531,21 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # Calculer les lignes finales (source unique de vérité)
-    tva_taux_global = getattr(data, 'tva_taux', 20.0)
-    resultats = calculer_lignes_finales(data, tva_taux_global)
+    # Détecter si c'est un devis figé
+    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
+    devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
+    
+    # ============================================================
+    # BRANCHE EXPLICITE : MODE "DEVIS FIGÉ" STRICT
+    # ============================================================
+    if devis_fige:
+        # NE PAS appeler calculer_lignes_finales
+        # Utiliser directement calculer_lignes_devis_fige_strict
+        resultats = calculer_lignes_devis_fige_strict(data)
+    else:
+        # Cas normal : utiliser calculer_lignes_finales
+        tva_taux_global = getattr(data, 'tva_taux', 20.0)
+        resultats = calculer_lignes_finales(data, tva_taux_global)
     
     lignes_normalisees = resultats['lignes_normalisees']
     total_ht_initial = resultats['total_ht_initial']
