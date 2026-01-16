@@ -288,6 +288,7 @@ class FactureRequest(BaseModel):
     remise_valeur: Optional[float] = 0
     statut: Optional[str] = "en_attente"  # "en_attente", "payee", etc.
     acompte_ttc_deja_facture: Optional[float] = 0  # Montant TTC de l'acompte déjà facturé (pour facture finale)
+    acompte_references: Optional[List[str]] = None  # Références des factures d'acompte (numéros) pour affichage
     is_facture_acompte: Optional[bool] = False  # True si c'est une facture d'acompte
     taux_acompte: Optional[float] = None  # Pourcentage d'acompte (ex: 30 pour 30%) - pour facture d'acompte uniquement
     lignes_finales_devis: Optional[List[PrestationFinale]] = None  # Lignes du devis après remise (source unique de vérité) - si présent, utiliser directement sans recalcul
@@ -1541,7 +1542,19 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     if not is_facture_acompte and acompte_ttc_deja_facture > 0:
         c.setFont("Helvetica", 10)
         c.setFillColor(GRIS_FONCE)
-        c.drawString(x_label, y_totaux - y_offset, "Acompte TTC déjà payé")
+        
+        # Construire le libellé avec référence(s) si disponible(s)
+        acompte_references = getattr(data, 'acompte_references', None)
+        if acompte_references and len(acompte_references) > 0:
+            references_str = acompte_references.join(', ')
+            if len(acompte_references) == 1:
+                libelle_acompte = f"Acompte déjà facturé ({references_str})"
+            else:
+                libelle_acompte = f"Acomptes déjà facturés ({references_str})"
+        else:
+            libelle_acompte = "Acompte TTC déjà payé"
+        
+        c.drawString(x_label, y_totaux - y_offset, libelle_acompte)
         c.setFillColor(HexColor('#e74c3c'))
         c.drawRightString(x_value, y_totaux - y_offset, f"-{acompte_ttc_deja_facture:.2f} €")
         c.setFillColor(GRIS_FONCE)
