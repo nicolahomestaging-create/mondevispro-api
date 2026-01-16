@@ -635,26 +635,52 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
     
     y_ligne = y_table - 2*mm
-    total_ht_avant_acompte = 0
+    total_ht_avant_acompte = 0  # HT avant remise (pour affichage)
+    total_ht_apres_remise = 0  # HT après remise ligne par ligne
     total_acompte = 0
     tva_par_taux = {}  # Dictionnaire pour grouper la TVA par taux
     
-    # Dessiner les lignes
+    # Calculer la remise (pourcentage ou montant)
+    remise_type = None
+    remise_valeur = 0
+    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
+        remise_type = data.remise_type
+        remise_valeur = data.remise_valeur
+    
+    # Calculer le montant total de remise (pour affichage)
+    remise_totale = 0
+    if remise_type == "montant":
+        remise_totale = remise_valeur
+    
+    # Pour chaque ligne : appliquer remise, puis calculer TVA
     for i, prestation in enumerate(data.prestations):
         y_ligne -= 10*mm
-        total_ligne = prestation.quantite * prestation.prix_unitaire
+        # 1. Calculer HT ligne (avant remise)
+        total_ligne_ht = prestation.quantite * prestation.prix_unitaire
         
-        # Utiliser le taux TVA de la prestation ou le taux global
-        tva_taux_ligne = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
-        
-        # Séparer les prestations positives et les acomptes (négatifs)
-        if total_ligne >= 0:
-            total_ht_avant_acompte += total_ligne
-            # Calculer la TVA pour cette ligne
-            montant_tva_ligne = total_ligne * (tva_taux_ligne / 100)
+        if total_ligne_ht >= 0:
+            total_ht_avant_acompte += total_ligne_ht
+            
+            # 2. Appliquer la remise sur cette ligne
+            if remise_type == "pourcentage":
+                remise_ligne = total_ligne_ht * (remise_valeur / 100)
+            elif remise_type == "montant":
+                # Répartir la remise proportionnellement si c'est un montant fixe
+                # On calculera la remise totale d'abord, puis on répartira
+                remise_ligne = 0  # Sera calculé après
+            else:
+                remise_ligne = 0
+            
+            # 3. HT ligne après remise
+            total_ligne_ht_remise = total_ligne_ht - remise_ligne
+            total_ht_apres_remise += total_ligne_ht_remise
+            
+            # 4. Calculer la TVA sur le HT remisé
+            tva_taux_ligne = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
+            montant_tva_ligne = total_ligne_ht_remise * (tva_taux_ligne / 100)
             tva_par_taux[tva_taux_ligne] = tva_par_taux.get(tva_taux_ligne, 0) + montant_tva_ligne
         else:
-            total_acompte += abs(total_ligne)
+            total_acompte += abs(total_ligne_ht)
         
         # Alterner les couleurs de fond
         if i % 2 == 0:
@@ -667,8 +693,28 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
         c.drawString(90*mm, y_ligne + 2*mm, str(prestation.quantite))
         c.drawString(105*mm, y_ligne + 2*mm, prestation.unite)
         c.drawString(125*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        tva_taux_ligne = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
         c.drawString(150*mm, y_ligne + 2*mm, f"{tva_taux_ligne:.1f}%")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne_ht:.2f} €")
+    
+    # Si remise de type "montant", répartir proportionnellement
+    if remise_type == "montant" and total_ht_avant_acompte > 0:
+        remise_totale = remise_valeur
+        ratio_remise = remise_valeur / total_ht_avant_acompte
+        # Recalculer avec la répartition proportionnelle
+        total_ht_apres_remise = 0
+        tva_par_taux = {}
+        for prestation in data.prestations:
+            total_ligne_ht = prestation.quantite * prestation.prix_unitaire
+            if total_ligne_ht >= 0:
+                remise_ligne = total_ligne_ht * ratio_remise
+                total_ligne_ht_remise = total_ligne_ht - remise_ligne
+                total_ht_apres_remise += total_ligne_ht_remise
+                tva_taux_ligne = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
+                montant_tva_ligne = total_ligne_ht_remise * (tva_taux_ligne / 100)
+                tva_par_taux[tva_taux_ligne] = tva_par_taux.get(tva_taux_ligne, 0) + montant_tva_ligne
+    elif remise_type == "pourcentage":
+        remise_totale = total_ht_avant_acompte * (remise_valeur / 100)
     
     y_ligne -= 5*mm
     
@@ -679,21 +725,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     
     y_totaux = y_ligne - 10*mm
     
-    # Calcul de la remise
-    remise = 0
-    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
-        if data.remise_type == "pourcentage":
-            remise = total_ht_avant_acompte * (data.remise_valeur / 100)
-        elif data.remise_type == "montant":
-            remise = data.remise_valeur
-    
-    # Appliquer la remise proportionnellement à chaque taux de TVA
-    ratio_remise = (total_ht_avant_acompte - remise) / total_ht_avant_acompte if total_ht_avant_acompte > 0 else 1
-    for taux in tva_par_taux:
-        tva_par_taux[taux] = tva_par_taux[taux] * ratio_remise
-    
     # Calculer les totaux finaux
-    total_ht_apres_remise = total_ht_avant_acompte - remise
     total_ht_final = total_ht_apres_remise - total_acompte
     total_tva = sum(tva_par_taux.values())
     total_ttc = total_ht_final + total_tva
@@ -710,18 +742,18 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     
     # Afficher la remise si elle existe
     y_offset = 6*mm
-    if remise > 0:
+    if remise_totale > 0:
         if hasattr(data, 'remise_type') and data.remise_type == "pourcentage":
             c.drawString(x_label, y_totaux - y_offset, f"Remise ({data.remise_valeur}%)")
         else:
             c.drawString(x_label, y_totaux - y_offset, "Remise")
         c.setFillColor(HexColor('#e74c3c'))
-        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise:.2f} €")
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_totale:.2f} €")
         c.setFillColor(GRIS_FONCE)
         y_offset += 6*mm
     
     # Afficher "Total HT après remise" si remise ou acompte
-    if remise > 0 or total_acompte > 0:
+    if remise_totale > 0 or total_acompte > 0:
         c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
         y_offset += 6*mm
@@ -826,40 +858,76 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # Calculer les totaux globaux sur toutes les prestations avec TVA par ligne
-    total_ht_avant_acompte = 0
+    # Calculer les totaux ligne par ligne : remise appliquée sur chaque ligne, puis TVA calculée
+    total_ht_avant_acompte = 0  # HT avant remise (pour affichage)
+    total_ht_apres_remise = 0  # HT après remise ligne par ligne
     total_acompte = 0
     tva_par_taux = {}  # Dictionnaire pour grouper la TVA par taux
     
+    # Calculer la remise (pourcentage ou montant)
+    remise_type = None
+    remise_valeur = 0
+    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
+        remise_type = data.remise_type
+        remise_valeur = data.remise_valeur
+    
+    # Calculer le montant total de remise (pour affichage)
+    remise_totale = 0
+    if remise_type == "pourcentage":
+        # On calculera la remise totale après avoir sommé les HT
+        pass
+    elif remise_type == "montant":
+        remise_totale = remise_valeur
+    
+    # Pour chaque ligne : appliquer remise, puis calculer TVA
     for prestation in data.prestations:
-        total_ligne = prestation.quantite * prestation.prix_unitaire
+        # 1. Calculer HT ligne (avant remise)
+        total_ligne_ht = prestation.quantite * prestation.prix_unitaire
         
-        # Utiliser le taux TVA de la prestation ou le taux global
-        tva_taux_ligne = prestation.tva_taux if prestation.tva_taux is not None else data.tva_taux
-        
-        if total_ligne >= 0:
-            total_ht_avant_acompte += total_ligne
-            # Calculer la TVA pour cette ligne
-            montant_tva_ligne = total_ligne * (tva_taux_ligne / 100)
+        if total_ligne_ht >= 0:
+            total_ht_avant_acompte += total_ligne_ht
+            
+            # 2. Appliquer la remise sur cette ligne
+            if remise_type == "pourcentage":
+                remise_ligne = total_ligne_ht * (remise_valeur / 100)
+            elif remise_type == "montant":
+                # Répartir la remise proportionnellement si c'est un montant fixe
+                # On calculera la remise totale d'abord, puis on répartira
+                remise_ligne = 0  # Sera calculé après
+            else:
+                remise_ligne = 0
+            
+            # 3. HT ligne après remise
+            total_ligne_ht_remise = total_ligne_ht - remise_ligne
+            total_ht_apres_remise += total_ligne_ht_remise
+            
+            # 4. Calculer la TVA sur le HT remisé
+            tva_taux_ligne = prestation.tva_taux if prestation.tva_taux is not None else data.tva_taux
+            montant_tva_ligne = total_ligne_ht_remise * (tva_taux_ligne / 100)
             tva_par_taux[tva_taux_ligne] = tva_par_taux.get(tva_taux_ligne, 0) + montant_tva_ligne
         else:
-            total_acompte += abs(total_ligne)
+            total_acompte += abs(total_ligne_ht)
     
-    # Calcul de la remise
-    remise = 0
-    if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
-        if data.remise_type == "pourcentage":
-            remise = total_ht_avant_acompte * (data.remise_valeur / 100)
-        elif data.remise_type == "montant":
-            remise = data.remise_valeur
-    
-    # Appliquer la remise proportionnellement à chaque taux de TVA
-    ratio_remise = (total_ht_avant_acompte - remise) / total_ht_avant_acompte if total_ht_avant_acompte > 0 else 1
-    for taux in tva_par_taux:
-        tva_par_taux[taux] = tva_par_taux[taux] * ratio_remise
+    # Si remise de type "montant", répartir proportionnellement
+    if remise_type == "montant" and total_ht_avant_acompte > 0:
+        remise_totale = remise_valeur
+        ratio_remise = remise_valeur / total_ht_avant_acompte
+        # Recalculer avec la répartition proportionnelle
+        total_ht_apres_remise = 0
+        tva_par_taux = {}
+        for prestation in data.prestations:
+            total_ligne_ht = prestation.quantite * prestation.prix_unitaire
+            if total_ligne_ht >= 0:
+                remise_ligne = total_ligne_ht * ratio_remise
+                total_ligne_ht_remise = total_ligne_ht - remise_ligne
+                total_ht_apres_remise += total_ligne_ht_remise
+                tva_taux_ligne = prestation.tva_taux if prestation.tva_taux is not None else data.tva_taux
+                montant_tva_ligne = total_ligne_ht_remise * (tva_taux_ligne / 100)
+                tva_par_taux[tva_taux_ligne] = tva_par_taux.get(tva_taux_ligne, 0) + montant_tva_ligne
+    elif remise_type == "pourcentage":
+        remise_totale = total_ht_avant_acompte * (remise_valeur / 100)
     
     # Calculer les totaux finaux
-    total_ht_apres_remise = total_ht_avant_acompte - remise
     total_ht_final = total_ht_apres_remise - total_acompte
     total_tva = sum(tva_par_taux.values())
     total_ttc = total_ht_final + total_tva
@@ -911,7 +979,7 @@ def generer_pdf_devis(data: DevisRequest) -> str:
             y_totaux = y_totaux_tableau
             
             # Dessiner les totaux
-            y_fin_totaux = dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, tva_par_taux, total_ht_final, total_ttc, data)
+            y_fin_totaux = dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise_totale, tva_par_taux, total_ht_final, total_ttc, data)
             
             # Bloc signature À GAUCHE (au niveau des totaux)
             y_signature = y_totaux - 5*mm
