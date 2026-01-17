@@ -1560,7 +1560,8 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
         # Construire le libellé avec référence(s) si disponible(s)
         acompte_references = getattr(data, 'acompte_references', None)
         if acompte_references and len(acompte_references) > 0:
-            references_str = acompte_references.join(', ')
+            # En Python, join() est une méthode de la chaîne, pas de la liste
+            references_str = ', '.join(acompte_references)
             if len(acompte_references) == 1:
                 libelle_acompte = f"Acompte déjà facturé ({references_str})"
             else:
