@@ -1420,15 +1420,26 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
     devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
     
+    # Log pour diagnostic
+    if devis_fige:
+        print(f"🔒 MODE DEVIS FIGÉ DÉTECTÉ dans dessiner_tableau_prestations")
+        print(f"   Nombre de lignes_finales_devis: {len(lignes_finales_devis)}")
+        print(f"   TVA par ligne:", [f"{l.tva_taux}%" for l in lignes_finales_devis])
+    else:
+        print(f"⚠️ MODE NORMAL - lignes_finales_devis non présent ou vide")
+        print(f"   lignes_finales_devis: {lignes_finales_devis}")
+    
     # ============================================================
     # BRANCHE EXPLICITE : MODE "DEVIS FIGÉ" STRICT
     # ============================================================
     if devis_fige:
         # NE PAS appeler calculer_lignes_finales
         # Utiliser directement calculer_lignes_devis_fige_strict
+        print(f"✅ Utilisation de calculer_lignes_devis_fige_strict (bypass calculer_lignes_finales)")
         resultats = calculer_lignes_devis_fige_strict(data)
     else:
         # Cas normal : utiliser calculer_lignes_finales
+        print(f"⚠️ Utilisation de calculer_lignes_finales (mode normal)")
         resultats = calculer_lignes_finales(data, tva_taux_global)
     
     lignes_normalisees = resultats['lignes_normalisees']
@@ -1647,15 +1658,25 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
     devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
     
+    # Log pour diagnostic
+    if devis_fige:
+        print(f"🔒 MODE DEVIS FIGÉ DÉTECTÉ dans generer_pdf_devis")
+        print(f"   Nombre de lignes_finales_devis: {len(lignes_finales_devis)}")
+        print(f"   TVA par ligne:", [f"{l.tva_taux}%" for l in lignes_finales_devis])
+    else:
+        print(f"⚠️ MODE NORMAL dans generer_pdf_devis - lignes_finales_devis non présent")
+    
     # ============================================================
     # BRANCHE EXPLICITE : MODE "DEVIS FIGÉ" STRICT
     # ============================================================
     if devis_fige:
         # NE PAS appeler calculer_lignes_finales
         # Utiliser directement calculer_lignes_devis_fige_strict
+        print(f"✅ Utilisation de calculer_lignes_devis_fige_strict (bypass calculer_lignes_finales)")
         resultats = calculer_lignes_devis_fige_strict(data)
     else:
         # Cas normal : utiliser calculer_lignes_finales
+        print(f"⚠️ Utilisation de calculer_lignes_finales (mode normal)")
         tva_taux_global = getattr(data, 'tva_taux', 20.0)
         resultats = calculer_lignes_finales(data, tva_taux_global)
     
