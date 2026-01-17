@@ -735,6 +735,8 @@ def calculer_lignes_finales(data, tva_taux_global):
     
     # Si lignes_finales_devis est présent, la facture est issue d'un devis
     # → Vérifier que les prestations ne modifient pas les lignes du devis
+    # NOTE : Cette validation est optionnelle car on utilisera TOUJOURS lignes_finales_devis
+    # même si des prestations sont fournies
     if lignes_finales_devis and len(lignes_finales_devis) > 0:
         # RÈGLE ABSOLUE : Les lignes de facture DOIVENT être identiques au devis
         # Vérifier si des prestations sont aussi fournies (ce qui serait une tentative de modification)
@@ -795,15 +797,16 @@ def calculer_lignes_finales(data, tva_taux_global):
                         f"Les factures issues d'un devis ne peuvent pas ajouter de nouvelles lignes."
                     )
             
-            # Si des erreurs sont détectées, lever une exception bloquante
+            # NOTE : Validation désactivée car on utilisera TOUJOURS lignes_finales_devis
+            # Les prestations peuvent être modifiées par l'utilisateur dans l'UI, mais elles seront ignorées
+            # On log juste un avertissement pour diagnostic
             if erreurs_validation:
-                message_erreur = (
-                    "FACTURE INVALIDE : Les lignes doivent être strictement identiques au devis.\n"
-                    "Erreurs détectées :\n" + "\n".join(f"  - {err}" for err in erreurs_validation) + "\n\n"
-                    "RÈGLE : Une facture issue d'un devis doit reprendre exactement les mêmes lignes "
-                    "(description, HT, TVA, unité). Toute modification est interdite."
-                )
-                raise ValueError(message_erreur)
+                print(f"⚠️ AVERTISSEMENT: Différences détectées entre prestations et lignes_finales_devis")
+                print(f"   Erreurs: {len(erreurs_validation)}")
+                for err in erreurs_validation[:3]:  # Limiter à 3 pour ne pas surcharger les logs
+                    print(f"     - {err}")
+                print(f"   → Les prestations seront IGNORÉES, utilisation de lignes_finales_devis")
+                # On ne lève plus d'erreur, on ignore simplement les prestations
     
     # ============================================================
     # ÉTAPE 1 : CONSTRUIRE LES LIGNES FINALES (source de vérité)
