@@ -1569,12 +1569,26 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
         else:
             libelle_acompte = "Acompte TTC déjà payé"
         
-        c.drawString(x_label, y_totaux - y_offset, libelle_acompte)
-        c.setFillColor(HexColor('#e74c3c'))
-        c.drawRightString(x_value, y_totaux - y_offset, f"-{acompte_ttc_deja_facture:.2f} €")
-        c.setFillColor(GRIS_FONCE)
-        y_offset += 6*mm
+        # Ligne de séparation visuelle avant l'acompte
+        y_offset += 3*mm
+        c.setStrokeColor(HexColor('#e0e0e0'))
+        c.setLineWidth(0.5)
+        c.line(x_label - 5*mm, y_totaux - y_offset, x_value + 5*mm, y_totaux - y_offset)
+        y_offset += 4*mm
         
+        # Affichage de l'acompte avec montant bien visible
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(GRIS_FONCE)
+        c.drawString(x_label, y_totaux - y_offset, libelle_acompte)
+        
+        # Montant de l'acompte en rouge, gras et plus grand pour visibilité
+        c.setFillColor(HexColor('#e74c3c'))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawRightString(x_value, y_totaux - y_offset, f"- {acompte_ttc_deja_facture:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 7*mm
+        
+        # Encadré pour "NET À PAYER TTC"
         c.setFont("Helvetica-Bold", 12)
         c.setFillColor(get_couleur_principale(data))
         c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
