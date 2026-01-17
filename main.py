@@ -1309,23 +1309,97 @@ def calculer_lignes_devis_fige_strict(data):
     # ============================================================
     # CAS FACTURE FINALE AVEC ACOMPTE
     # ============================================================
-    # Si une facture d'acompte existe :
-    # - L'acompte est soustrait UNIQUEMENT au TOTAL TTC
-    # - Aucune modification des lignes
-    # - net_a_payer_ttc = total_ttc - acompte_ttc
-    # - NE PAS recalculer la TVA
-    # - NE PAS répartir l'acompte en HT/TVA
+    # RÈGLE FISCALE ABSOLUE : Si plusieurs taux de TVA, l'acompte DOIT être ventilé
+    # proportionnellement par taux AVANT toute déduction.
+    # Il est INTERDIT de soustraire un acompte TTC global sur un panier multi-TVA.
+    
+    # Initialiser les variables pour le cas multi-TVA avec acompte
+    total_ht_restant = total_ht_final
+    total_tva_restante = total_tva
     
     if not is_facture_acompte and acompte_ttc_deja_facture > 0:
-        net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-        print(f"   Acompte TTC déjà facturé: {acompte_ttc_deja_facture:.2f} €")
-        print(f"   Net à payer TTC: {net_a_payer_ttc:.2f} € (Total TTC - Acompte TTC)")
-        if net_a_payer_ttc < 0:
-            raise ValueError(
-                f"ERREUR VALIDATION ACOMPTE: "
-                f"Net à payer TTC ({net_a_payer_ttc:.2f} €) < 0. "
-                f"L'acompte TTC ({acompte_ttc_deja_facture:.2f} €) dépasse le total TTC ({total_ttc:.2f} €)."
-            )
+        nombre_taux_tva = len(tva_par_taux)
+        
+        if nombre_taux_tva > 1:
+            # ============================================================
+            # VENTILATION PROPORTIONNELLE PAR TAUX DE TVA (OBLIGATOIRE)
+            # ============================================================
+            print(f"🔧 VENTILATION ACOMPTE MULTI-TVA ({nombre_taux_tva} taux détectés)")
+            print(f"   Acompte TTC à ventiler: {acompte_ttc_deja_facture:.2f} €")
+            
+            # 1) Calculer la base HT par taux
+            base_ht_par_taux = {}
+            for ligne in lignes_normalisees:
+                tva_taux = ligne['tva_taux']
+                if tva_taux not in base_ht_par_taux:
+                    base_ht_par_taux[tva_taux] = 0
+                base_ht_par_taux[tva_taux] += ligne['ht_final']
+            
+            total_ht_base = sum(base_ht_par_taux.values())
+            print(f"   Base HT totale: {total_ht_base:.2f} €")
+            for taux, base_ht in base_ht_par_taux.items():
+                print(f"     - Taux {taux}%: {base_ht:.2f} €")
+            
+            # 2) Convertir l'acompte TTC en HT (approximation : utiliser le taux moyen pondéré)
+            # Calculer le taux moyen pondéré de TVA
+            taux_moyen_pondere = total_tva / total_ht_final if total_ht_final > 0 else 0
+            acompte_ht_total = acompte_ttc_deja_facture / (1 + taux_moyen_pondere / 100) if taux_moyen_pondere > 0 else acompte_ttc_deja_facture
+            print(f"   Taux moyen pondéré: {taux_moyen_pondere:.2f}%")
+            print(f"   Acompte HT (approximatif): {acompte_ht_total:.2f} €")
+            
+            # 3) Ventiler l'acompte HT proportionnellement par taux
+            acompte_ht_par_taux = {}
+            acompte_tva_par_taux = {}
+            for taux, base_ht_taux in base_ht_par_taux.items():
+                if total_ht_base > 0:
+                    proportion = base_ht_taux / total_ht_base
+                    acompte_ht_taux = acompte_ht_total * proportion
+                    acompte_tva_taux = acompte_ht_taux * (taux / 100)
+                    acompte_ht_par_taux[taux] = acompte_ht_taux
+                    acompte_tva_par_taux[taux] = acompte_tva_taux
+                    print(f"     Taux {taux}%: proportion {proportion:.4f}, acompte HT {acompte_ht_taux:.2f} €, TVA {acompte_tva_taux:.2f} €")
+            
+            # 4) Calculer les montants restants par taux
+            ht_restant_par_taux = {}
+            tva_restante_par_taux = {}
+            for taux in base_ht_par_taux.keys():
+                ht_restant_par_taux[taux] = base_ht_par_taux[taux] - acompte_ht_par_taux.get(taux, 0)
+                tva_restante_par_taux[taux] = (base_ht_par_taux[taux] * taux / 100) - acompte_tva_par_taux.get(taux, 0)
+            
+            # 5) Recalculer les totaux finaux
+            total_ht_restant = sum(ht_restant_par_taux.values())
+            total_tva_restante = sum(tva_restante_par_taux.values())
+            net_a_payer_ttc = total_ht_restant + total_tva_restante
+            
+            # Mettre à jour les totaux pour l'affichage
+            total_ht_final = total_ht_restant
+            total_tva = total_tva_restante
+            tva_par_taux = tva_restante_par_taux
+            
+            print(f"   ✅ Totaux après ventilation:")
+            print(f"     Total HT restant: {total_ht_restant:.2f} €")
+            print(f"     Total TVA restante: {total_tva_restante:.2f} €")
+            print(f"     Net à payer TTC: {net_a_payer_ttc:.2f} €")
+            
+            if net_a_payer_ttc < 0:
+                raise ValueError(
+                    f"ERREUR VALIDATION ACOMPTE: "
+                    f"Net à payer TTC ({net_a_payer_ttc:.2f} €) < 0 après ventilation. "
+                    f"L'acompte TTC ({acompte_ttc_deja_facture:.2f} €) dépasse le total TTC ({total_ttc:.2f} €)."
+                )
+        else:
+            # ============================================================
+            # CAS UN SEUL TAUX : Comportement actuel autorisé
+            # ============================================================
+            net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
+            print(f"   Acompte TTC déjà facturé (mono-TVA): {acompte_ttc_deja_facture:.2f} €")
+            print(f"   Net à payer TTC: {net_a_payer_ttc:.2f} € (Total TTC - Acompte TTC)")
+            if net_a_payer_ttc < 0:
+                raise ValueError(
+                    f"ERREUR VALIDATION ACOMPTE: "
+                    f"Net à payer TTC ({net_a_payer_ttc:.2f} €) < 0. "
+                    f"L'acompte TTC ({acompte_ttc_deja_facture:.2f} €) dépasse le total TTC ({total_ttc:.2f} €)."
+                )
     else:
         net_a_payer_ttc = total_ttc
     
@@ -1396,13 +1470,26 @@ def calculer_lignes_devis_fige_strict(data):
     # OBJECTIF FINAL : Même devis accepté → même facture → mêmes totaux → toujours.
     print(f"✅ MODE DEVIS FIGÉ STRICT TERMINÉ - Source immuable respectée")
     
+    # Dans le cas multi-TVA avec acompte, utiliser les totaux après ventilation
+    # Sinon, utiliser les totaux initiaux
+    if not is_facture_acompte and acompte_ttc_deja_facture > 0 and len(tva_par_taux) > 1:
+        # Les totaux ont été recalculés dans la section ventilation
+        # Utiliser total_ht_restant et total_tva_restante
+        total_ht_final_affichage = total_ht_restant
+        total_tva_affichage = total_tva_restante
+    else:
+        # Utiliser les totaux initiaux
+        total_ht_final_affichage = total_ht_final
+        total_tva_affichage = total_tva
+    
     return {
         'lignes_normalisees': lignes_normalisees,
         'total_ht_initial': total_ht_final,  # Pour devis figé, ht_initial = ht_final (déjà remisé)
-        'total_ht_final': total_ht_final,
-        'tva_par_taux': tva_par_taux,
-        'total_tva': total_tva,
-        'total_ttc': total_ttc,
+        'total_ht_final': total_ht_final_affichage,  # Après ventilation si multi-TVA avec acompte
+        'tva_par_taux': tva_par_taux,  # Déjà mis à jour avec les TVA restantes en cas de ventilation
+        'total_tva': total_tva_affichage,  # Après ventilation si multi-TVA avec acompte
+        'total_ttc': total_ttc,  # Total TTC initial (avant déduction acompte)
+        'net_a_payer_ttc': net_a_payer_ttc,  # Net à payer après déduction acompte
         'lignes_deja_remisees': True,
         'acompte_ttc_deja_facture': acompte_ttc_deja_facture,
         'is_facture_acompte': is_facture_acompte,
@@ -1448,24 +1535,17 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     lignes_normalisees = resultats['lignes_normalisees']
     total_ht_initial = resultats['total_ht_initial']
     total_ht_final = resultats['total_ht_final']
-    tva_par_taux = resultats['tva_par_taux']
-    total_tva = resultats['total_tva']
-    total_ttc = resultats['total_ttc']
+    tva_par_taux = resultats['tva_par_taux']  # Déjà mis à jour avec TVA restantes si ventilation
+    total_tva = resultats['total_tva']  # Déjà mis à jour avec TVA restante si ventilation
+    total_ttc = resultats['total_ttc']  # Total TTC initial (avant déduction acompte)
+    net_a_payer_ttc = resultats.get('net_a_payer_ttc', total_ttc)  # Utiliser le net calculé (avec ventilation si multi-TVA)
     lignes_deja_remisees = resultats['lignes_deja_remisees']
     acompte_ttc_deja_facture = resultats['acompte_ttc_deja_facture']
     is_facture_acompte = resultats['is_facture_acompte']
     devis_fige = resultats['devis_fige']  # Flag explicite : devis figé = contractuel
     
-    # RÈGLE ABSOLUE : Facture finale issue d'un devis figé
-    # → NE PAS recalculer la TVA
-    # → NE PAS déduire d'HT
-    # → Calculer uniquement : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-    if not is_facture_acompte and acompte_ttc_deja_facture > 0:
-        # Facture finale avec acompte : déduire uniquement le TTC de l'acompte
-        # La TVA n'est JAMAIS recalculée après déduction de l'acompte
-        net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-    else:
-        net_a_payer_ttc = total_ttc
+    # NOTE : net_a_payer_ttc est déjà calculé correctement dans calculer_lignes_devis_fige_strict
+    # avec ventilation proportionnelle si multi-TVA, donc on l'utilise directement
     
     # En-tête du tableau
     c.setFillColor(get_couleur_principale(data))
@@ -1545,9 +1625,13 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     
     # Total TTC
     # Pour devis figé : total_ttc = total_ht + total_tva (somme des lignes uniquement)
+    # En cas de ventilation multi-TVA avec acompte, total_ht_final et total_tva sont déjà après ventilation
+    # donc total_ht_final + total_tva = net_a_payer_ttc
+    # On calcule le total TTC à afficher : si ventilation, c'est le net, sinon c'est le total initial
+    total_ttc_a_afficher = total_ht_final + total_tva  # Toujours cohérent (après ventilation si applicable)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
-    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc:.2f} €")
+    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_a_afficher:.2f} €")
     y_offset += 6*mm
     
     # Facture finale issue d'un devis figé : acompte et net à payer
