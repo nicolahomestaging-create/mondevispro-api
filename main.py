@@ -1554,21 +1554,6 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     # RÈGLE ABSOLUE : NE PAS recalculer la TVA, NE PAS déduire d'HT
     # → Calculer uniquement : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
     if not is_facture_acompte and acompte_ttc_deja_facture > 0:
-        c.setFont("Helvetica", 10)
-        c.setFillColor(GRIS_FONCE)
-        
-        # Construire le libellé avec référence(s) si disponible(s)
-        acompte_references = getattr(data, 'acompte_references', None)
-        if acompte_references and len(acompte_references) > 0:
-            # En Python, join() est une méthode de la chaîne, pas de la liste
-            references_str = ', '.join(acompte_references)
-            if len(acompte_references) == 1:
-                libelle_acompte = f"Acompte déjà facturé ({references_str})"
-            else:
-                libelle_acompte = f"Acomptes déjà facturés ({references_str})"
-        else:
-            libelle_acompte = "Acompte TTC déjà payé"
-        
         # Ligne de séparation visuelle avant l'acompte
         y_offset += 3*mm
         c.setStrokeColor(HexColor('#e0e0e0'))
@@ -1576,17 +1561,29 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
         c.line(x_label - 5*mm, y_totaux - y_offset, x_value + 5*mm, y_totaux - y_offset)
         y_offset += 4*mm
         
-        # Affichage de l'acompte avec montant bien visible
+        # Libellé de l'acompte (sans référence dans le libellé principal)
         c.setFont("Helvetica-Bold", 10)
         c.setFillColor(GRIS_FONCE)
-        c.drawString(x_label, y_totaux - y_offset, libelle_acompte)
+        c.drawString(x_label, y_totaux - y_offset, "Acompte déjà facturé")
         
-        # Montant de l'acompte en rouge, gras et plus grand pour visibilité
+        # Montant de l'acompte en rouge, gras et plus grand pour visibilité maximale
         c.setFillColor(HexColor('#e74c3c'))
-        c.setFont("Helvetica-Bold", 11)
+        c.setFont("Helvetica-Bold", 12)
         c.drawRightString(x_value, y_totaux - y_offset, f"- {acompte_ttc_deja_facture:.2f} €")
+        y_offset += 5*mm
+        
+        # Référence(s) de l'acompte sur une ligne séparée en plus petit
+        acompte_references = getattr(data, 'acompte_references', None)
+        if acompte_references and len(acompte_references) > 0:
+            references_str = ', '.join(acompte_references)
+            c.setFont("Helvetica", 8)
+            c.setFillColor(HexColor('#666666'))
+            c.drawString(x_label, y_totaux - y_offset, f"Référence(s): {references_str}")
+            y_offset += 4*mm
+        else:
+            y_offset += 2*mm
+        
         c.setFillColor(GRIS_FONCE)
-        y_offset += 7*mm
         
         # Encadré pour "NET À PAYER TTC"
         c.setFont("Helvetica-Bold", 12)
