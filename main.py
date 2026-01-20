@@ -1726,7 +1726,7 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     total_ttc = resultats['total_ttc']
     lignes_deja_remisees = resultats['lignes_deja_remisees']
     
-  # Calcul de la remise à partir des données du devis
+    # Calcul de la remise à partir des données du devis
     remise_type = getattr(data, 'remise_type', None)
     remise_valeur = getattr(data, 'remise_valeur', 0) or 0
 
@@ -1852,7 +1852,8 @@ def generer_pdf_devis(data: DevisRequest) -> str:
         print(f"❌ Erreur lors de la sauvegarde du PDF: {e}")
         raise
     
-return filepath, numero_devis, total_ht_final, total_ttc
+    return filepath, numero_devis, total_ht_final, total_ttc
+
 
 def generer_pdf_facture(data: FactureRequest) -> str:
     numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
