@@ -1726,16 +1726,16 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     total_ttc = resultats['total_ttc']
     lignes_deja_remisees = resultats['lignes_deja_remisees']
     
-   # Calcul de la remise à partir des données du devis
-remise_type = getattr(data, 'remise_type', None)
-remise_valeur = getattr(data, 'remise_valeur', 0) or 0
+  # Calcul de la remise à partir des données du devis
+    remise_type = getattr(data, 'remise_type', None)
+    remise_valeur = getattr(data, 'remise_valeur', 0) or 0
 
-if remise_type == "pourcentage" and remise_valeur > 0:
-    remise_totale = total_ht_initial * (remise_valeur / 100)
-elif remise_type in ["montant", "fixe"] and remise_valeur > 0:
-    remise_totale = remise_valeur
-else:
-    remise_totale = 0
+    if remise_type == "pourcentage" and remise_valeur > 0:
+        remise_totale = total_ht_initial * (remise_valeur / 100)
+    elif remise_type in ["montant", "fixe"] and remise_valeur > 0:
+        remise_totale = remise_valeur
+    else:
+        remise_totale = 0
     
     # Pagination : diviser les lignes normalisées en groupes
     lignes_par_page = 11  # Nombre de lignes par page
@@ -1852,8 +1852,7 @@ else:
         print(f"❌ Erreur lors de la sauvegarde du PDF: {e}")
         raise
     
-    return filepath, numero_devis, total_ht_final, total_ttc
-
+return filepath, numero_devis, total_ht_final, total_ttc
 
 def generer_pdf_facture(data: FactureRequest) -> str:
     numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
