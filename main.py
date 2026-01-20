@@ -505,11 +505,7 @@ def dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_valid
 
 def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, remise_totale, tva_par_taux, total_ttc, data, lignes_deja_remisees):
     """
-    Dessine les totaux pour un devis - utilise les lignes normalisées comme source de vérité
-    
-    RÈGLE ABSOLUE : Les lignes affichées sont DÉJÀ remisées (remise appliquée ligne par ligne)
-    → AUCUNE remise globale à afficher (incompatible avec multi-TVA)
-    → Afficher UNIQUEMENT : Total HT, TVA par taux, Total TTC
+    Dessine les totaux pour un devis avec affichage de la remise si présente
     """
     x_label = 130*mm
     x_value = width - 18*mm
@@ -518,12 +514,33 @@ def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, 
     
     y_offset = 0
     
-    # RÈGLE ABSOLUE : Les lignes sont TOUJOURS remisées (remise appliquée ligne par ligne)
-    # → Afficher UNIQUEMENT : Total HT (somme des lignes déjà remisées)
-    # → JAMAIS de "Remise" ou "Total HT après remise" (incompatible avec multi-TVA)
-    c.drawString(x_label, y_totaux, "Total HT")
-    c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
+    # Total HT (avant remise si remise présente)
+    if remise_totale > 0:
+        c.drawString(x_label, y_totaux, "Total HT avant remise")
+    else:
+        c.drawString(x_label, y_totaux, "Total HT")
+    c.drawRightString(x_value, y_totaux, f"{total_ht_initial:.2f} €")
     y_offset = 6*mm
+    
+    # Afficher la remise si elle existe
+    if remise_totale > 0:
+        remise_type = getattr(data, 'remise_type', None)
+        remise_valeur = getattr(data, 'remise_valeur', 0)
+        
+        if remise_type == "pourcentage" and remise_valeur:
+            c.drawString(x_label, y_totaux - y_offset, f"Remise ({remise_valeur}%)")
+        else:
+            c.drawString(x_label, y_totaux - y_offset, "Remise")
+        
+        c.setFillColor(HexColor('#e74c3c'))
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_totale:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 6*mm
+        
+        # Total HT après remise
+        c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_final:.2f} €")
+        y_offset += 6*mm
     
     # Afficher TVA par taux
     for taux in sorted(tva_par_taux.keys()):
@@ -533,10 +550,12 @@ def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, 
             c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
             y_offset += 6*mm
         elif len(tva_par_taux) == 1:
+            c.setFont("Helvetica-Oblique", 8)
             c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+            c.setFont("Helvetica", 10)
             y_offset += 6*mm
     
-    # Total TTC
+    # Total TTC avec encadré coloré
     c.setFillColor(get_couleur_principale(data))
     c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
     c.setFillColor(white)
@@ -545,7 +564,6 @@ def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, 
     c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
     
     return y_totaux - y_offset - 8*mm
-
 
 def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, tva_taux, total_ht_final, total_ttc, data):
     """Dessine les totaux à droite - tva_taux peut être un dict (tva_par_taux) ou un float (taux unique)"""
@@ -1708,8 +1726,16 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     total_ttc = resultats['total_ttc']
     lignes_deja_remisees = resultats['lignes_deja_remisees']
     
-    # Calculer remise totale pour affichage
-    remise_totale = total_ht_initial - total_ht_final if not lignes_deja_remisees else 0
+   # Calcul de la remise à partir des données du devis
+remise_type = getattr(data, 'remise_type', None)
+remise_valeur = getattr(data, 'remise_valeur', 0) or 0
+
+if remise_type == "pourcentage" and remise_valeur > 0:
+    remise_totale = total_ht_initial * (remise_valeur / 100)
+elif remise_type in ["montant", "fixe"] and remise_valeur > 0:
+    remise_totale = remise_valeur
+else:
+    remise_totale = 0
     
     # Pagination : diviser les lignes normalisées en groupes
     lignes_par_page = 11  # Nombre de lignes par page
