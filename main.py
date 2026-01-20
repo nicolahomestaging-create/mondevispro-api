@@ -211,6 +211,8 @@ class Prestation(BaseModel):
     unite: str
     prix_unitaire: float
     tva_taux: Optional[float] = None  # Taux TVA par ligne (20, 10, 5.5, 0, etc.)
+    description_detaillee: Optional[str] = None  # Description détaillée sous la description principale
+    notes: Optional[str] = None  # Notes additionnelles
 
 class PrestationFinale(BaseModel):
     """Prestation avec montants figés après remise (source unique de vérité)"""
@@ -219,6 +221,8 @@ class PrestationFinale(BaseModel):
     unite: str
     ht_apres_remise: float  # HT après remise (FIGÉ, ne jamais recalculer)
     tva_taux: float  # Taux TVA (FIGÉ, ne jamais modifier)
+    description_detaillee: Optional[str] = None  # Description détaillée
+    notes: Optional[str] = None  # Notes additionnelles
 
 class Entreprise(BaseModel):
     nom: str
@@ -653,25 +657,62 @@ def dessiner_lignes_normalisees(c, width, lignes_normalisees, y_table, data, ind
     
     # Dessiner les lignes normalisées
     for i, ligne in enumerate(lignes_normalisees):
-        y_ligne -= 10*mm
+        # Calculer la hauteur nécessaire pour cette ligne
+        description_detaillee = ligne.get('description_detaillee', '')
+        notes = ligne.get('notes', '')
+        
+        # Hauteur de base : 10mm, +4mm par ligne supplémentaire
+        hauteur_ligne = 10*mm
+        if description_detaillee and description_detaillee.strip():
+            hauteur_ligne += 4*mm
+        if notes and notes.strip():
+            hauteur_ligne += 4*mm
+        
+        y_ligne -= hauteur_ligne
         
         # Alterner les couleurs de fond
         if (index_debut + i) % 2 == 0:
             c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, 10*mm, fill=True, stroke=False)
+            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
         
         c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica-Bold", 9)
+        
+        # Position Y pour le texte (en haut de la cellule)
+        y_texte = y_ligne + hauteur_ligne - 8*mm
+        
+        # Description principale
+        c.drawString(18*mm, y_texte, tronquer_texte(ligne['description'], 50))
+        
+        # Description détaillée (en dessous, plus petite, gris)
+        if description_detaillee and description_detaillee.strip():
+            y_texte -= 4*mm
+            c.setFont("Helvetica", 7)
+            c.setFillColor(HexColor('#666666'))
+            c.drawString(18*mm, y_texte, tronquer_texte(description_detaillee, 60))
+        
+        # Notes (en dessous, italique, gris clair)
+        if notes and notes.strip():
+            y_texte -= 4*mm
+            c.setFont("Helvetica-Oblique", 7)
+            c.setFillColor(HexColor('#888888'))
+            c.drawString(18*mm, y_texte, f"Note: {tronquer_texte(notes, 55)}")
+        
+        # Remettre la couleur et police pour les autres colonnes
+        c.setFillColor(GRIS_FONCE)
         c.setFont("Helvetica", 9)
-        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(ligne['description'], 50))
-        c.drawString(90*mm, y_ligne + 2*mm, str(ligne['quantite']))
-        c.drawString(105*mm, y_ligne + 2*mm, ligne['unite'])
+        
+        # Quantité, Unité, Prix (alignés en haut)
+        y_autres = y_ligne + hauteur_ligne - 8*mm
+        c.drawString(90*mm, y_autres, str(ligne['quantite']))
+        c.drawString(105*mm, y_autres, ligne['unite'])
         
         # Prix unitaire affiché (calculé depuis ht_initial - AVANT remise)
         ht_pour_affichage = ligne.get('ht_initial', ligne['ht_final'])
         prix_unitaire = ht_pour_affichage / ligne['quantite'] if ligne['quantite'] > 0 else 0
-        c.drawString(125*mm, y_ligne + 2*mm, f"{prix_unitaire:.2f} €")
-        c.drawString(150*mm, y_ligne + 2*mm, f"{ligne['tva_taux']:.1f}%")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{ht_pour_affichage:.2f} €")
+        c.drawString(125*mm, y_autres, f"{prix_unitaire:.2f} €")
+        c.drawString(150*mm, y_autres, f"{ligne['tva_taux']:.1f}%")
+        c.drawRightString(width - 18*mm, y_autres, f"{ht_pour_affichage:.2f} €")
     
     y_ligne -= 5*mm
     
@@ -879,6 +920,8 @@ def calculer_lignes_finales(data, tva_taux_global):
                 'ht_initial': ligne.ht_apres_remise,   # HT déjà remisé (FIGÉ)
                 'ht_final': ligne.ht_apres_remise,     # HT FIGÉ (DÉFINITIF - ne jamais recalculer)
                 'tva_taux': ligne.tva_taux,            # TVA FIGÉE (DÉFINITIF - ne jamais modifier)
+                'description_detaillee': getattr(ligne, 'description_detaillee', None),
+                'notes': getattr(ligne, 'notes', None),
                 'deja_remise': True,
                 'devis_fige': True  # Flag pour bypasser TOUTE logique de traitement
             })
@@ -926,6 +969,8 @@ def calculer_lignes_finales(data, tva_taux_global):
                 'ht_initial': ht_initial,
                 'ht_final': ht_final,
                 'tva_taux': tva_taux,
+                'description_detaillee': getattr(prestation, 'description_detaillee', None),
+                'notes': getattr(prestation, 'notes', None),
                 'deja_remise': False
             })
     
@@ -983,6 +1028,8 @@ def calculer_lignes_finales(data, tva_taux_global):
                 'ht_initial': ligne['ht_initial'],     # HT initial FIGÉ
                 'ht_final': ligne['ht_final'],        # HT final FIGÉ (DÉFINITIF - ne jamais recalculer)
                 'tva_taux': ligne['tva_taux'],        # TVA FIGÉE (DÉFINITIF - ne jamais modifier)
+                'description_detaillee': ligne.get('description_detaillee'),
+                'notes': ligne.get('notes'),
                 'deja_remise': ligne['deja_remise'],
                 'devis_fige': True
             })
@@ -1507,25 +1554,62 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
     
     # Afficher les lignes
     for i, ligne in enumerate(lignes_normalisees):
-        y_ligne -= 10*mm
+        # Calculer la hauteur nécessaire pour cette ligne
+        description_detaillee = ligne.get('description_detaillee', '')
+        notes = ligne.get('notes', '')
+        
+        # Hauteur de base : 10mm, +4mm par ligne supplémentaire
+        hauteur_ligne = 10*mm
+        if description_detaillee and description_detaillee.strip():
+            hauteur_ligne += 4*mm
+        if notes and notes.strip():
+            hauteur_ligne += 4*mm
+        
+        y_ligne -= hauteur_ligne
         
         # Alterner couleurs
         if i % 2 == 0:
             c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, 10*mm, fill=True, stroke=False)
+            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
         
         c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica-Bold", 9)
+        
+        # Position Y pour le texte (en haut de la cellule)
+        y_texte = y_ligne + hauteur_ligne - 8*mm
+        
+        # Description principale
+        c.drawString(18*mm, y_texte, tronquer_texte(ligne['description'], 50))
+        
+        # Description détaillée (en dessous, plus petite, gris)
+        if description_detaillee and description_detaillee.strip():
+            y_texte -= 4*mm
+            c.setFont("Helvetica", 7)
+            c.setFillColor(HexColor('#666666'))
+            c.drawString(18*mm, y_texte, tronquer_texte(description_detaillee, 60))
+        
+        # Notes (en dessous, italique, gris clair)
+        if notes and notes.strip():
+            y_texte -= 4*mm
+            c.setFont("Helvetica-Oblique", 7)
+            c.setFillColor(HexColor('#888888'))
+            c.drawString(18*mm, y_texte, f"Note: {tronquer_texte(notes, 55)}")
+        
+        # Remettre la couleur et police pour les autres colonnes
+        c.setFillColor(GRIS_FONCE)
         c.setFont("Helvetica", 9)
-        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(ligne['description'], 50))
-        c.drawString(90*mm, y_ligne + 2*mm, str(ligne['quantite']))
-        c.drawString(105*mm, y_ligne + 2*mm, ligne['unite'])
+        
+        # Quantité, Unité, Prix (alignés en haut)
+        y_autres = y_ligne + hauteur_ligne - 8*mm
+        c.drawString(90*mm, y_autres, str(ligne['quantite']))
+        c.drawString(105*mm, y_autres, ligne['unite'])
         
         # Prix unitaire affiché (calculé depuis ht_initial - AVANT remise)
         ht_pour_affichage = ligne.get('ht_initial', ligne['ht_final'])
         prix_unitaire = ht_pour_affichage / ligne['quantite'] if ligne['quantite'] > 0 else 0
-        c.drawString(125*mm, y_ligne + 2*mm, f"{prix_unitaire:.2f} €")
-        c.drawString(150*mm, y_ligne + 2*mm, f"{ligne['tva_taux']:.1f}%")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{ht_pour_affichage:.2f} €")
+        c.drawString(125*mm, y_autres, f"{prix_unitaire:.2f} €")
+        c.drawString(150*mm, y_autres, f"{ligne['tva_taux']:.1f}%")
+        c.drawRightString(width - 18*mm, y_autres, f"{ht_pour_affichage:.2f} €")
     
     y_ligne -= 5*mm
     
