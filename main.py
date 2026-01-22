@@ -736,19 +736,25 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     if is_facture_acompte and total_ttc_fourni is not None:
         print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni: {total_ttc_fourni}")
         print(f"   total_ht fourni: {total_ht_fourni}")
+        print(f"   tva_taux: {tva_taux}")
         
         # Utiliser directement les valeurs fournies
         total_ttc = float(total_ttc_fourni)
+        print(f"   total_ttc converti en float: {total_ttc}")
         
         if total_ht_fourni is not None:
             total_ht_final = float(total_ht_fourni)
             montant_tva = total_ttc - total_ht_final
+            print(f"   Utilisation total_ht fourni: HT={total_ht_final}, TVA={montant_tva}, TTC={total_ttc}")
         elif tva_taux == 0:
+            # Si TVA = 0, HT = TTC (utiliser total_ttc fourni directement)
             total_ht_final = total_ttc
             montant_tva = 0
+            print(f"   TVA = 0, donc HT = TTC: HT={total_ht_final}, TTC={total_ttc}")
         else:
             total_ht_final = total_ttc / (1 + tva_taux / 100)
             montant_tva = total_ttc - total_ht_final
+            print(f"   Calcul HT à partir de TTC: HT={total_ht_final}, TVA={montant_tva}, TTC={total_ttc}")
         
         # Pour l'affichage dans le tableau, utiliser total_ht_final
         total_ht_avant_acompte = total_ht_final
@@ -1920,6 +1926,18 @@ async def generer_facture_endpoint(data: FactureRequest):
         print(f"📊 Nombre de prestations: {len(data.prestations)}")
         print(f"🎨 Couleur PDF: {data.entreprise.couleur_pdf or 'défaut'}")
         print(f"📋 Numéro de facture à utiliser: '{numero_facture_recu}'")
+        
+        # DEBUG: Vérifier les valeurs pour facture d'acompte
+        is_facture_acompte = getattr(data, 'is_facture_acompte', False)
+        total_ttc_recu = getattr(data, 'total_ttc', None)
+        total_ht_recu = getattr(data, 'total_ht', None)
+        print(f"🔍 DEBUG FACTURE ACOMPTE:")
+        print(f"   is_facture_acompte: {is_facture_acompte}")
+        print(f"   total_ttc reçu: {total_ttc_recu} (type: {type(total_ttc_recu)})")
+        print(f"   total_ht reçu: {total_ht_recu} (type: {type(total_ht_recu)})")
+        if data.prestations and len(data.prestations) > 0:
+            print(f"   prix_unitaire prestation: {data.prestations[0].prix_unitaire}")
+            print(f"   quantite prestation: {data.prestations[0].quantite}")
         
         # FORCER l'utilisation du numéro reçu en mettant à jour data.numero_facture
         try:
