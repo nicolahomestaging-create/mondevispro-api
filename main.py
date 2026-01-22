@@ -210,19 +210,6 @@ class Prestation(BaseModel):
     quantite: float
     unite: str
     prix_unitaire: float
-    tva_taux: Optional[float] = None  # Taux TVA par ligne (20, 10, 5.5, 0, etc.)
-    description_detaillee: Optional[str] = None  # Description détaillée sous la description principale
-    notes: Optional[str] = None  # Notes additionnelles
-
-class PrestationFinale(BaseModel):
-    """Prestation avec montants figés après remise (source unique de vérité)"""
-    description: str
-    quantite: float
-    unite: str
-    ht_apres_remise: float  # HT après remise (FIGÉ, ne jamais recalculer)
-    tva_taux: float  # Taux TVA (FIGÉ, ne jamais modifier)
-    description_detaillee: Optional[str] = None  # Description détaillée
-    notes: Optional[str] = None  # Notes additionnelles
 
 class Entreprise(BaseModel):
     nom: str
@@ -254,13 +241,13 @@ class DevisRequest(BaseModel):
     entreprise: Entreprise
     client: Client
     prestations: List[Prestation]
-    numero_devis: Optional[str] = None  # Numéro fourni par le frontend
     tva_taux: float = 20.0
     conditions_paiement: str = "30% à la commande, solde à réception"
     delai_realisation: str = "À définir"
     validite_jours: int = 30
     remise_type: Optional[str] = None  # "pourcentage" ou "fixe"
     remise_valeur: Optional[float] = 0
+    numero_devis: Optional[str] = None  # Numéro de devis fourni par le client (OBLIGATOIRE)
 
 class DevisDataFromAI(BaseModel):
     client_nom: str
@@ -285,17 +272,17 @@ class FactureRequest(BaseModel):
     prestations: List[Prestation]
     tva_taux: float = 20.0
     numero_devis_origine: Optional[str] = None
+    numero_facture: Optional[str] = None  # Numéro de facture fourni par le frontend
     date_echeance_jours: int = 30
     mention_legale_tva: Optional[str] = ""
     rib: Optional[RIB] = None
     remise_type: Optional[str] = None  # "pourcentage" ou "montant"
     remise_valeur: Optional[float] = 0
     statut: Optional[str] = "en_attente"  # "en_attente", "payee", etc.
-    acompte_ttc_deja_facture: Optional[float] = 0  # Montant TTC de l'acompte déjà facturé (pour facture finale)
-    acompte_references: Optional[List[str]] = None  # Références des factures d'acompte (numéros) pour affichage
-    is_facture_acompte: Optional[bool] = False  # True si c'est une facture d'acompte
-    taux_acompte: Optional[float] = None  # Pourcentage d'acompte (ex: 30 pour 30%) - pour facture d'acompte uniquement
-    lignes_finales_devis: Optional[List[PrestationFinale]] = None  # Lignes du devis après remise (source unique de vérité) - si présent, utiliser directement sans recalcul
+    total_ht: Optional[float] = None  # Total HT pour factures d'acompte
+    total_ttc: Optional[float] = None  # Total TTC pour factures d'acompte
+    is_facture_acompte: Optional[bool] = False  # Flag pour factures d'acompte
+    taux_acompte: Optional[float] = None  # Taux d'acompte en pourcentage
 
 
 # ==================== FONCTIONS UTILITAIRES ====================
@@ -478,6 +465,7 @@ def dessiner_bloc_client(c, width, height, data, y_position):
 
 def dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite):
     """Dessine l'en-tête de page (pour la première page et les pages suivantes)"""
+    print(f"🔍 dessiner_en_tete_page - numero_devis reçu: '{numero_devis}'")
     c.setFillColor(get_couleur_principale(data))
     c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
     
@@ -507,7 +495,7 @@ def dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_valid
     c.drawRightString(width - 20*mm, height - 36*mm, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
 
 
-def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, remise_totale, tva_par_taux, total_ttc, data, lignes_deja_remisees):
+def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, tva_taux, total_ht_final, total_ttc, data):
     """
     Dessine les totaux pour un devis avec affichage de la remise si présente
     """
@@ -518,20 +506,43 @@ def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, 
     
     y_offset = 0
     
+    # Récupérer les informations de remise depuis data
+    remise_type = getattr(data, 'remise_type', None)
+    remise_valeur_raw = getattr(data, 'remise_valeur', None)
+    
+    # Convertir remise_valeur en nombre
+    remise_valeur = 0
+    if remise_valeur_raw is not None:
+        try:
+            remise_valeur = float(remise_valeur_raw)
+        except (ValueError, TypeError):
+            remise_valeur = 0
+    
+    # Normaliser remise_type
+    if remise_type:
+        remise_type = str(remise_type).strip()
+        if remise_type == "" or remise_type.lower() == "none":
+            remise_type = None
+    
+    # Calculer la remise totale à partir de data si nécessaire
+    remise_totale = remise
+    if remise_totale == 0 and remise_type and remise_valeur > 0:
+        if remise_type == "pourcentage":
+            remise_totale = total_ht_avant_acompte * (remise_valeur / 100)
+        elif remise_type in ["montant", "fixe"]:
+            remise_totale = remise_valeur
+    
     # Total HT (avant remise si remise présente)
     if remise_totale > 0:
         c.drawString(x_label, y_totaux, "Total HT avant remise")
     else:
         c.drawString(x_label, y_totaux, "Total HT")
-    c.drawRightString(x_value, y_totaux, f"{total_ht_initial:.2f} €")
+    c.drawRightString(x_value, y_totaux, f"{total_ht_avant_acompte:.2f} €")
     y_offset = 6*mm
     
     # Afficher la remise si elle existe
     if remise_totale > 0:
-        remise_type = getattr(data, 'remise_type', None)
-        remise_valeur = getattr(data, 'remise_valeur', 0)
-        
-        if remise_type == "pourcentage" and remise_valeur:
+        if remise_type == "pourcentage" and remise_valeur > 0:
             c.drawString(x_label, y_totaux - y_offset, f"Remise ({remise_valeur}%)")
         else:
             c.drawString(x_label, y_totaux - y_offset, "Remise")
@@ -546,8 +557,43 @@ def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, 
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_final:.2f} €")
         y_offset += 6*mm
     
+    # Afficher l'acompte si présent
+    if total_acompte > 0:
+        c.drawString(x_label, y_totaux - y_offset, "Acompte déduit")
+        c.setFillColor(HexColor('#e74c3c'))
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 6*mm
+    
+    # Calculer TVA par taux à partir des prestations
+    tva_par_taux = {}
+    for prestation in data.prestations:
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        if total_ligne > 0:  # Ignorer les acomptes
+            # Utiliser le taux de TVA de la prestation si disponible, sinon le taux global
+            taux = getattr(prestation, 'tva_taux', None) or tva_taux
+            if taux not in tva_par_taux:
+                tva_par_taux[taux] = 0
+            # Appliquer la remise proportionnellement si nécessaire
+            if remise_totale > 0:
+                ratio_remise = (total_ht_avant_acompte - remise_totale) / total_ht_avant_acompte if total_ht_avant_acompte > 0 else 1
+                total_ligne_apres_remise = total_ligne * ratio_remise
+            else:
+                total_ligne_apres_remise = total_ligne
+            # Déduire l'acompte si présent
+            total_ligne_final = total_ligne_apres_remise
+            tva_par_taux[taux] += total_ligne_final * (taux / 100)
+    
+    # Si pas de prestations avec TVA, utiliser le calcul simple
+    if not tva_par_taux:
+        montant_tva_total = total_ht_final * (tva_taux / 100)
+        if tva_taux > 0:
+            tva_par_taux[tva_taux] = montant_tva_total
+        else:
+            tva_par_taux[0] = 0
+    
     # Afficher TVA par taux
-    for taux in sorted(tva_par_taux.keys()):
+    for taux in sorted(tva_par_taux.keys(), reverse=True):
         montant = tva_par_taux[taux]
         if taux > 0:
             c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
@@ -567,10 +613,286 @@ def dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, 
     c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
     c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
     
-    return y_totaux - y_offset - 8*mm
+    return y_totaux - y_offset - 8*mm  # Retourner la position Y finale
 
-def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, tva_taux, total_ht_final, total_ttc, data):
-    """Dessine les totaux à droite - tva_taux peut être un dict (tva_par_taux) ou un float (taux unique)"""
+
+def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debut=0):
+    """Dessine les lignes de prestations (en-tête + lignes) et retourne la position Y finale et les totaux calculés"""
+    # En-tête du tableau
+    c.setFillColor(get_couleur_principale(data))
+    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
+    
+    c.setFillColor(white)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(18*mm, y_table + 3*mm, "Description")
+    c.drawString(105*mm, y_table + 3*mm, "Qté")
+    c.drawString(120*mm, y_table + 3*mm, "Unité")
+    c.drawString(142*mm, y_table + 3*mm, "P.U. HT")
+    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
+    
+    y_ligne = y_table - 2*mm
+    total_ht_avant_acompte = 0
+    total_acompte = 0
+    
+    # Dessiner les lignes
+    for i, prestation in enumerate(prestations):
+        y_ligne -= 10*mm
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        
+        # Séparer les prestations positives et les acomptes (négatifs)
+        if total_ligne >= 0:
+            total_ht_avant_acompte += total_ligne
+        else:
+            total_acompte += abs(total_ligne)
+        
+        # Alterner les couleurs de fond
+        hauteur_ligne = 10*mm
+        
+        # Gérer descriptions enrichies
+        description_principale = prestation.description if hasattr(prestation, 'description') else ''
+        description_detaillee = getattr(prestation, 'description_detaillee', '') or ''
+        notes = getattr(prestation, 'notes', '') or ''
+        
+        if description_detaillee or notes:
+            lignes_detail = []
+            if description_detaillee:
+                mots_detail = description_detaillee.split()
+                ligne_courante = ""
+                for mot in mots_detail:
+                    if len(ligne_courante + " " + mot) <= 45:
+                        ligne_courante = (ligne_courante + " " + mot).strip()
+                    else:
+                        if ligne_courante:
+                            lignes_detail.append(ligne_courante)
+                        ligne_courante = mot
+                if ligne_courante:
+                    lignes_detail.append(ligne_courante)
+            
+            nb_lignes_detail = len(lignes_detail)
+            if notes:
+                nb_lignes_detail += 1
+            
+            if nb_lignes_detail > 0:
+                hauteur_ligne = (10 + (nb_lignes_detail * 4)) * mm
+        
+        if (index_debut + i) % 2 == 0:
+            c.setFillColor(HexColor('#f8f9fa'))
+            c.rect(15*mm, y_ligne - hauteur_ligne + 10*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
+        
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 9)
+        
+        # Description principale
+        y_text = y_ligne + 2*mm
+        c.drawString(18*mm, y_text, tronquer_texte(description_principale, 50))
+        
+        # Description détaillée et notes
+        y_detail = y_ligne - 3*mm
+        if description_detaillee:
+            c.setFont("Helvetica", 7)
+            c.setFillColor(HexColor('#666666'))
+            for ligne_detail in lignes_detail[:3]:
+                c.drawString(18*mm, y_detail, tronquer_texte(ligne_detail, 60))
+                y_detail -= 3.5*mm
+        
+        if notes:
+            c.setFont("Helvetica-Oblique", 7)
+            c.setFillColor(HexColor('#888888'))
+            notes_texte = f"Note: {tronquer_texte(notes, 55)}"
+            c.drawString(18*mm, y_detail, notes_texte)
+            y_detail -= 3.5*mm
+        
+        # Colonnes standard
+        c.setFont("Helvetica", 9)
+        c.setFillColor(GRIS_FONCE)
+        c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
+        c.drawString(120*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
+        c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+        
+        y_ligne -= hauteur_ligne
+    
+    y_ligne -= 5*mm
+    
+    # Ligne de séparation
+    c.setStrokeColor(GRIS_CLAIR)
+    c.setLineWidth(1)
+    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+    
+    return y_ligne - 10*mm, total_ht_avant_acompte, total_acompte
+
+
+def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
+    """Dessine le tableau des prestations pour une facture avec totaux"""
+    # ============================================================
+    # CAS SPÉCIAL : FACTURE D'ACOMPTE AVEC TOTAL_TTC FOURNI
+    # ============================================================
+    # Si c'est une facture d'acompte ET que total_ttc est fourni,
+    # utiliser directement ces valeurs au lieu de recalculer
+    is_facture_acompte = getattr(data, 'is_facture_acompte', False)
+    total_ttc_fourni = getattr(data, 'total_ttc', None)
+    total_ht_fourni = getattr(data, 'total_ht', None)
+    
+    if is_facture_acompte and total_ttc_fourni is not None:
+        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni: {total_ttc_fourni}")
+        print(f"   total_ht fourni: {total_ht_fourni}")
+        
+        # Utiliser directement les valeurs fournies
+        total_ttc = float(total_ttc_fourni)
+        
+        if total_ht_fourni is not None:
+            total_ht_final = float(total_ht_fourni)
+            montant_tva = total_ttc - total_ht_final
+        elif tva_taux == 0:
+            total_ht_final = total_ttc
+            montant_tva = 0
+        else:
+            total_ht_final = total_ttc / (1 + tva_taux / 100)
+            montant_tva = total_ttc - total_ht_final
+        
+        # Pour l'affichage dans le tableau, utiliser total_ht_final
+        total_ht_avant_acompte = total_ht_final
+        total_acompte = 0
+        remise = 0
+        total_ht_apres_remise = total_ht_final
+        
+        print(f"✅ Totaux facture d'acompte - HT: {total_ht_final:.2f}, TVA: {montant_tva:.2f}, TTC: {total_ttc:.2f}")
+    else:
+        # Calcul normal : initialiser les variables
+        total_ht_avant_acompte = 0
+        total_acompte = 0
+    
+    # En-tête du tableau
+    c.setFillColor(get_couleur_principale(data))
+    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
+    
+    c.setFillColor(white)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(18*mm, y_table + 3*mm, "Description")
+    c.drawString(105*mm, y_table + 3*mm, "Qté")
+    c.drawString(120*mm, y_table + 3*mm, "Unité")
+    c.drawString(142*mm, y_table + 3*mm, "P.U. HT")
+    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
+    
+    y_ligne = y_table - 2*mm
+    
+    # Dessiner les lignes
+    for i, prestation in enumerate(data.prestations):
+        # Calculer hauteur de ligne selon contenu
+        hauteur_ligne = 10*mm
+        description_principale = prestation.description if hasattr(prestation, 'description') else ''
+        description_detaillee = getattr(prestation, 'description_detaillee', '') or ''
+        notes = getattr(prestation, 'notes', '') or ''
+        
+        if description_detaillee or notes:
+            lignes_detail = []
+            if description_detaillee:
+                mots_detail = description_detaillee.split()
+                ligne_courante = ""
+                for mot in mots_detail:
+                    if len(ligne_courante + " " + mot) <= 45:
+                        ligne_courante = (ligne_courante + " " + mot).strip()
+                    else:
+                        if ligne_courante:
+                            lignes_detail.append(ligne_courante)
+                        ligne_courante = mot
+                if ligne_courante:
+                    lignes_detail.append(ligne_courante)
+            
+            nb_lignes_detail = len(lignes_detail)
+            if notes:
+                nb_lignes_detail += 1
+            
+            if nb_lignes_detail > 0:
+                hauteur_ligne = (10 + (nb_lignes_detail * 4)) * mm
+        
+        y_ligne -= hauteur_ligne
+        
+        # Pour facture d'acompte avec valeurs fournies, utiliser total_ht_final pour l'affichage
+        if is_facture_acompte and total_ttc_fourni is not None:
+            total_ligne = total_ht_final  # Utiliser le HT fourni pour l'affichage
+        else:
+            total_ligne = prestation.quantite * prestation.prix_unitaire
+            # Séparer les prestations positives et les acomptes (négatifs)
+            if total_ligne >= 0:
+                total_ht_avant_acompte += total_ligne
+            else:
+                total_acompte += abs(total_ligne)
+        
+        print(f"🔍 DEBUG prestation - description: {getattr(prestation, 'description', 'N/A')}, quantite: {prestation.quantite}, prix_unitaire: {prestation.prix_unitaire}, total_ligne: {total_ligne}")
+        
+        # Alterner les couleurs de fond
+        if i % 2 == 0:
+            c.setFillColor(HexColor('#f8f9fa'))
+            c.rect(15*mm, y_ligne - hauteur_ligne + 10*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
+        
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 9)
+        
+        # Description principale
+        y_text = y_ligne + 2*mm
+        c.drawString(18*mm, y_text, tronquer_texte(description_principale, 50))
+        
+        # Description détaillée et notes
+        y_detail = y_ligne - 3*mm
+        if description_detaillee:
+            c.setFont("Helvetica", 7)
+            c.setFillColor(HexColor('#666666'))
+            for ligne_detail in lignes_detail[:3]:
+                c.drawString(18*mm, y_detail, tronquer_texte(ligne_detail, 60))
+                y_detail -= 3.5*mm
+        
+        if notes:
+            c.setFont("Helvetica-Oblique", 7)
+            c.setFillColor(HexColor('#888888'))
+            notes_texte = f"Note: {tronquer_texte(notes, 55)}"
+            c.drawString(18*mm, y_detail, notes_texte)
+            y_detail -= 3.5*mm
+        
+        # Colonnes standard
+        c.setFont("Helvetica", 9)
+        c.setFillColor(GRIS_FONCE)
+        c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
+        c.drawString(120*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
+        c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+    
+    y_ligne -= 5*mm
+    
+    # Ligne de séparation
+    c.setStrokeColor(GRIS_CLAIR)
+    c.setLineWidth(1)
+    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+    
+    y_totaux = y_ligne - 10*mm
+    
+    # Calculer les totaux finaux
+    if is_facture_acompte and total_ttc_fourni is not None:
+        # Les valeurs ont déjà été calculées au début de la fonction
+        # total_ttc, total_ht_final, montant_tva sont déjà définis
+        total_ht = total_ht_final
+        remise = 0
+        total_ht_apres_remise = total_ht_final
+        # montant_tva a déjà été calculé au début de la fonction
+        print(f"✅ Utilisation des totaux fournis pour facture d'acompte - HT: {total_ht_final:.2f}, TVA: {montant_tva:.2f}, TTC: {total_ttc:.2f}")
+    else:
+        # Calcul normal pour factures classiques
+        # Calcul de la remise
+        remise = 0
+        if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
+            if data.remise_type == "pourcentage":
+                remise = total_ht_avant_acompte * (data.remise_valeur / 100)
+            elif data.remise_type == "montant":
+                remise = data.remise_valeur
+        
+        # Appliquer la remise, puis déduire l'acompte
+        total_ht_apres_remise = total_ht_avant_acompte - remise
+        total_ht_final = total_ht_apres_remise - total_acompte
+        montant_tva = total_ht_final * (tva_taux / 100)
+        total_ttc = total_ht_final + montant_tva
+        # Pour l'affichage, utiliser le total HT avant remise et acompte
+        total_ht = total_ht_avant_acompte
+    
     x_label = 130*mm
     x_value = width - 18*mm
     c.setFillColor(GRIS_FONCE)
@@ -593,7 +915,6 @@ def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_
     # Afficher "Total HT après remise" si remise ou acompte
     if remise > 0 or total_acompte > 0:
         c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
-        total_ht_apres_remise = total_ht_avant_acompte - remise
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
         y_offset += 6*mm
     
@@ -605,1128 +926,21 @@ def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_
         c.setFillColor(GRIS_FONCE)
         y_offset += 6*mm
     
-    # Calculer tva_par_taux depuis les prestations si non fourni
-    # (pour compatibilité avec l'ancien code)
-    if isinstance(tva_taux, dict):
-        tva_par_taux = tva_taux
-    else:
-        # Fallback: calculer avec un seul taux (ancien comportement)
-        montant_tva = total_ht_final * (tva_taux / 100)
-        tva_par_taux = {tva_taux: montant_tva} if tva_taux > 0 else {}
-    
-    # Afficher chaque taux de TVA séparément
-    for taux in sorted(tva_par_taux.keys()):
-        montant = tva_par_taux[taux]
-        if taux > 0:
-            c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
-            c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
-            y_offset += 6*mm
-        elif len(tva_par_taux) == 1:  # Seulement si c'est le seul taux et qu'il est à 0
-            c.setFont("Helvetica-Oblique", 8)
-            c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
-            c.setFont("Helvetica", 10)
-            y_offset += 6*mm
-    
-    c.setFillColor(get_couleur_principale(data))
-    c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
-    
-    c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
-    c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
-    
-    return y_totaux - y_offset - 8*mm  # Retourner la position Y finale
-
-
-def dessiner_lignes_normalisees(c, width, lignes_normalisees, y_table, data, index_debut=0):
-    """Dessine les lignes normalisées (en-tête + lignes) et retourne la position Y finale"""
-    # En-tête du tableau
-    c.setFillColor(get_couleur_principale(data))
-    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
-    
-    c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(18*mm, y_table + 3*mm, "Description")
-    c.drawString(90*mm, y_table + 3*mm, "Qté")
-    c.drawString(105*mm, y_table + 3*mm, "Unité")
-    c.drawString(125*mm, y_table + 3*mm, "P.U. HT")
-    c.drawString(150*mm, y_table + 3*mm, "TVA")
-    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
-    
-    y_ligne = y_table - 2*mm
-    
-    # Dessiner les lignes normalisées
-    for i, ligne in enumerate(lignes_normalisees):
-        # Calculer la hauteur nécessaire pour cette ligne
-        description_detaillee = ligne.get('description_detaillee', '')
-        notes = ligne.get('notes', '')
-        
-        # Hauteur de base : 10mm, +4mm par ligne supplémentaire
-        hauteur_ligne = 10*mm
-        if description_detaillee and description_detaillee.strip():
-            hauteur_ligne += 4*mm
-        if notes and notes.strip():
-            hauteur_ligne += 4*mm
-        
-        y_ligne -= hauteur_ligne
-        
-        # Alterner les couleurs de fond
-        if (index_debut + i) % 2 == 0:
-            c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
-        
-        c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica-Bold", 9)
-        
-        # Position Y pour le texte (en haut de la cellule)
-        y_texte = y_ligne + hauteur_ligne - 8*mm
-        
-        # Description principale
-        c.drawString(18*mm, y_texte, tronquer_texte(ligne['description'], 50))
-        
-        # Description détaillée (en dessous, plus petite, gris)
-        if description_detaillee and description_detaillee.strip():
-            y_texte -= 4*mm
-            c.setFont("Helvetica", 7)
-            c.setFillColor(HexColor('#666666'))
-            c.drawString(18*mm, y_texte, tronquer_texte(description_detaillee, 60))
-        
-        # Notes (en dessous, italique, gris clair)
-        if notes and notes.strip():
-            y_texte -= 4*mm
-            c.setFont("Helvetica-Oblique", 7)
-            c.setFillColor(HexColor('#888888'))
-            c.drawString(18*mm, y_texte, f"Note: {tronquer_texte(notes, 55)}")
-        
-        # Remettre la couleur et police pour les autres colonnes
-        c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica", 9)
-        
-        # Quantité, Unité, Prix (alignés en haut)
-        y_autres = y_ligne + hauteur_ligne - 8*mm
-        c.drawString(90*mm, y_autres, str(ligne['quantite']))
-        c.drawString(105*mm, y_autres, ligne['unite'])
-        
-        # Prix unitaire affiché (calculé depuis ht_initial - AVANT remise)
-        ht_pour_affichage = ligne.get('ht_initial', ligne['ht_final'])
-        prix_unitaire = ht_pour_affichage / ligne['quantite'] if ligne['quantite'] > 0 else 0
-        c.drawString(125*mm, y_autres, f"{prix_unitaire:.2f} €")
-        c.drawString(150*mm, y_autres, f"{ligne['tva_taux']:.1f}%")
-        c.drawRightString(width - 18*mm, y_autres, f"{ht_pour_affichage:.2f} €")
-    
-    y_ligne -= 5*mm
-    
-    # Ligne de séparation
-    c.setStrokeColor(GRIS_CLAIR)
-    c.setLineWidth(1)
-    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
-    
-    return y_ligne - 10*mm
-
-
-def calculer_lignes_finales(data, tva_taux_global):
-    """
-    Calcule les lignes finales avec normalisation, fusion et remise.
-    Cette fonction est la SOURCE UNIQUE de vérité pour tous les calculs.
-    
-    RÈGLE MÉTIER FONDAMENTALE :
-    Un devis figé est une source de vérité ABSOLUE.
-    Si une facture est générée à partir d'un devis accepté (option A / devis figé),
-    alors AUCUN recalcul n'est autorisé.
-    
-    COMPORTEMENT DEVIS FIGÉ (STRICT) :
-    Si devis_fige == True :
-    - Utiliser UNIQUEMENT lignes_finales_devis
-    - Aucune normalisation de description
-    - Aucune fusion de lignes
-    - Aucun recalcul de TVA
-    - Aucun remapping de taux
-    - Les champs ht_final et tva_taux sont considérés COMME DÉFINITIFS
-    
-    CALCUL DES TOTAUX (unique et simple) :
-    - total_ht = somme(ligne.ht_final)
-    - total_tva = somme(ht_final × tva_taux par ligne)
-    - total_ttc = total_ht + total_tva
-    
-    FACTURE FINALE AVEC ACOMPTE :
-    Si acompte_ttc_deja_facture est présent :
-    - net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-    - NE PAS recalculer la TVA
-    - NE PAS répartir l'acompte en HT/TVA
-    
-    INTERDICTIONS EXPLICITES :
-    - INTERDIT de recalculer les lignes à partir des règles courantes
-    - INTERDIT de modifier la TVA entre devis et facture
-    - INTERDIT de "corriger" les données du devis
-    
-    CONTRÔLE DE SÉCURITÉ :
-    Si facture issue d'un devis figé ET si total recalculé ≠ total devis
-    → lever une erreur explicite
-    
-    RÈGLES DE FUSION (cas normal, pas devis figé) :
-    - Fusion uniquement si description normalisée + TVA + unité identiques
-    - Si description identique mais TVA ou unité différente → lignes distinctes (warning)
-    - Le moteur ne corrige pas les erreurs de saisie métier, il reflète strictement les données
-    
-    BUT FINAL :
-    Même devis → même facture (hors acompte).
-    Le moteur doit être DÉTERMINISTE, TRAÇABLE et FISCALLEMENT CONFORME.
-    
-    Retourne :
-    - lignes_normalisees : liste des lignes finales (après normalisation/fusion/remise)
-    - total_ht_initial : somme des HT avant remise
-    - total_ht_final : somme des HT après remise
-    - tva_par_taux : dictionnaire {taux: montant_tva}
-    - total_tva : somme des TVA
-    - total_ttc : total HT + total TVA
-    - lignes_deja_remisees : booléen indiquant si les lignes sont déjà remisées
-    - devis_fige : booléen indiquant si c'est un devis figé (source de vérité absolue)
-    - warnings : liste des warnings de cohérence métier (prestations similaires avec TVA/unité différentes)
-    """
-    # Récupérer les paramètres
-    acompte_ttc_deja_facture = getattr(data, 'acompte_ttc_deja_facture', 0) or 0
-    is_facture_acompte = getattr(data, 'is_facture_acompte', False)
-    taux_acompte = getattr(data, 'taux_acompte', None)
-    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
-    
-    # ============================================================
-    # VALIDATION STRICTE : Facture issue d'un devis
-    # ============================================================
-    
-    # Si lignes_finales_devis est présent, la facture est issue d'un devis
-    # → Vérifier que les prestations ne modifient pas les lignes du devis
-    # NOTE : Cette validation est optionnelle car on utilisera TOUJOURS lignes_finales_devis
-    # même si des prestations sont fournies
-    if lignes_finales_devis and len(lignes_finales_devis) > 0:
-        # RÈGLE ABSOLUE : Les lignes de facture DOIVENT être identiques au devis
-        # Vérifier si des prestations sont aussi fournies (ce qui serait une tentative de modification)
-        if hasattr(data, 'prestations') and data.prestations and len(data.prestations) > 0:
-            # Comparer chaque ligne du devis avec les prestations fournies
-            erreurs_validation = []
-            
-            # Créer un mapping des lignes du devis par description normalisée + TVA + unité
-            lignes_devis_map = {}
-            for ligne_devis in lignes_finales_devis:
-                cle = (
-                    ligne_devis.description.strip().lower(),
-                    ligne_devis.tva_taux,
-                    ligne_devis.unite
-                )
-                if cle not in lignes_devis_map:
-                    lignes_devis_map[cle] = []
-                lignes_devis_map[cle].append(ligne_devis)
-            
-            # Vérifier chaque prestation fournie
-            for i, prestation in enumerate(data.prestations):
-                desc_norm = prestation.description.strip().lower()
-                tva_prestation = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
-                unite_prestation = prestation.unite
-                ht_prestation = prestation.quantite * prestation.prix_unitaire
-                
-                cle = (desc_norm, tva_prestation, unite_prestation)
-                
-                if cle in lignes_devis_map:
-                    # Ligne trouvée dans le devis → vérifier que HT et TVA sont identiques
-                    ligne_devis_correspondante = lignes_devis_map[cle][0]
-                    ht_devis = ligne_devis_correspondante.ht_apres_remise
-                    
-                    # Vérifier HT (tolérance de 0.01 € pour arrondis)
-                    if abs(ht_prestation - ht_devis) > 0.01:
-                        erreurs_validation.append(
-                            f"Ligne {i+1} '{prestation.description}': HT facture ({ht_prestation:.2f} €) "
-                            f"≠ HT devis ({ht_devis:.2f} €)"
-                        )
-                    
-                    # Vérifier TVA
-                    if abs(tva_prestation - ligne_devis_correspondante.tva_taux) > 0.01:
-                        erreurs_validation.append(
-                            f"Ligne {i+1} '{prestation.description}': TVA facture ({tva_prestation}%) "
-                            f"≠ TVA devis ({ligne_devis_correspondante.tva_taux}%)"
-                        )
-                    
-                    # Vérifier unité
-                    if unite_prestation != ligne_devis_correspondante.unite:
-                        erreurs_validation.append(
-                            f"Ligne {i+1} '{prestation.description}': Unité facture ('{unite_prestation}') "
-                            f"≠ Unité devis ('{ligne_devis_correspondante.unite}')"
-                        )
-                else:
-                    # Ligne non trouvée dans le devis → nouvelle ligne interdite
-                    erreurs_validation.append(
-                        f"Ligne {i+1} '{prestation.description}' n'existe pas dans le devis. "
-                        f"Les factures issues d'un devis ne peuvent pas ajouter de nouvelles lignes."
-                    )
-            
-            # NOTE : Validation désactivée car on utilisera TOUJOURS lignes_finales_devis
-            # Les prestations peuvent être modifiées par l'utilisateur dans l'UI, mais elles seront ignorées
-            # On log juste un avertissement pour diagnostic
-            if erreurs_validation:
-                print(f"⚠️ AVERTISSEMENT: Différences détectées entre prestations et lignes_finales_devis")
-                print(f"   Erreurs: {len(erreurs_validation)}")
-                for err in erreurs_validation[:3]:  # Limiter à 3 pour ne pas surcharger les logs
-                    print(f"     - {err}")
-                print(f"   → Les prestations seront IGNORÉES, utilisation de lignes_finales_devis")
-                # On ne lève plus d'erreur, on ignore simplement les prestations
-    
-    # ============================================================
-    # ÉTAPE 1 : CONSTRUIRE LES LIGNES FINALES (source de vérité)
-    # ============================================================
-    
-    # ============================================================
-    # DÉTECTION DEVIS FIGÉ (CENTRALE ET PROPAGÉE PARTOUT)
-    # ============================================================
-    
-    # RÈGLE MÉTIER FONDAMENTALE : Un devis figé est une source de vérité ABSOLUE
-    # Si une facture est générée à partir d'un devis accepté (option A / devis figé),
-    # alors AUCUN recalcul n'est autorisé.
-    
-    devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
-    
-    # RÈGLE ABSOLUE : Si devis figé, IGNORER complètement les prestations du FactureRequest
-    # Le devis figé est la source unique de vérité, aucune autre source n'est autorisée
-    # INTERDICTIONS EXPLICITES :
-    # - INTERDIT de recalculer les lignes à partir des règles courantes
-    # - INTERDIT de modifier la TVA entre devis et facture
-    # - INTERDIT de "corriger" les données du devis
-    if devis_fige:
-        # Vérifier qu'on n'essaie pas d'utiliser des prestations différentes
-        if hasattr(data, 'prestations') and data.prestations and len(data.prestations) > 0:
-            # La validation stricte a déjà été faite plus haut (ligne ~698)
-            # Si on arrive ici, c'est que les prestations sont identiques au devis
-            # → On les ignore quand même et on utilise uniquement lignes_finales_devis
-            pass
-    
-    lignes_finales = []  # Liste des lignes finales à afficher
-    
-    if devis_fige:
-        # ============================================================
-        # CAS A : DEVIS FIGÉ - Facture issue d'un devis (STRICT)
-        # ============================================================
-        # RÈGLE MÉTIER FONDAMENTALE : Un devis figé est une source de vérité ABSOLUE
-        # → Utiliser UNIQUEMENT lignes_finales_devis
-        # → Aucune normalisation de description
-        # → Aucune fusion de lignes
-        # → Aucun recalcul de TVA
-        # → Aucun remapping de taux
-        # → Les champs ht_final et tva_taux sont considérés COMME DÉFINITIFS
-        
-        for ligne in lignes_finales_devis:
-            # Copie directe sans aucune modification
-            # Les valeurs sont DÉFINITIVES et ne doivent JAMAIS être recalculées
-            lignes_finales.append({
-                'description': ligne.description,      # Description EXACTE (pas de strip/lower)
-                'quantite': ligne.quantite,            # Quantité FIGÉE
-                'unite': ligne.unite,                   # Unité FIGÉE
-                'ht_initial': ligne.ht_apres_remise,   # HT déjà remisé (FIGÉ)
-                'ht_final': ligne.ht_apres_remise,     # HT FIGÉ (DÉFINITIF - ne jamais recalculer)
-                'tva_taux': ligne.tva_taux,            # TVA FIGÉE (DÉFINITIF - ne jamais modifier)
-                'description_detaillee': getattr(ligne, 'description_detaillee', None),
-                'notes': getattr(ligne, 'notes', None),
-                'deja_remise': True,
-                'devis_fige': True  # Flag pour bypasser TOUTE logique de traitement
-            })
-    else:
-        # CAS B : Lignes non remisées (calcul normal)
-        # → Calculer HT initial, appliquer remise ligne par ligne
-        remise_type = getattr(data, 'remise_type', None)
-        remise_valeur = getattr(data, 'remise_valeur', 0) or 0
-        
-        # Calculer le ratio de remise si montant fixe
-        total_ht_initial_global = sum(p.quantite * p.prix_unitaire for p in data.prestations if p.quantite * p.prix_unitaire > 0)
-        ratio_remise = 0
-        if remise_type == "montant" and total_ht_initial_global > 0:
-            ratio_remise = remise_valeur / total_ht_initial_global
-        elif remise_type == "pourcentage":
-            ratio_remise = remise_valeur / 100
-        
-        for prestation in data.prestations:
-            ht_initial = prestation.quantite * prestation.prix_unitaire
-            if ht_initial <= 0:
-                continue
-            
-            # RÈGLE ABSOLUE : Appliquer remise ligne par ligne AVANT TVA
-            # Dans un panier multi-TVA, il n'existe PAS de remise globale
-            # La remise DOIT être appliquée ligne par ligne
-            if remise_type == "pourcentage":
-                # ht_final = ht_initial * (1 - remise_pct)
-                ht_final = ht_initial * (1 - ratio_remise)
-            elif remise_type == "montant":
-                # Répartir proportionnellement
-                remise_ligne = ht_initial * ratio_remise
-                ht_final = ht_initial - remise_ligne
-            else:
-                ht_final = ht_initial
-            
-            # Taux TVA
-            tva_taux = prestation.tva_taux if prestation.tva_taux is not None else tva_taux_global
-            if tva_taux is None:
-                raise ValueError(f"Taux TVA manquant pour '{prestation.description}'")
-            
-            lignes_finales.append({
-                'description': prestation.description,
-                'quantite': prestation.quantite,
-                'unite': prestation.unite,
-                'ht_initial': ht_initial,
-                'ht_final': ht_final,
-                'tva_taux': tva_taux,
-                'description_detaillee': getattr(prestation, 'description_detaillee', None),
-                'notes': getattr(prestation, 'notes', None),
-                'deja_remise': False
-            })
-    
-    # ============================================================
-    # ÉTAPE 2 : NORMALISATION ET FUSION (AVANT tout calcul)
-    # ============================================================
-    
-    # ============================================================
-    # ÉTAPE 2 : NORMALISATION ET FUSION (AVANT tout calcul)
-    # ============================================================
-    
-    # RÈGLE ABSOLUE : Si devis figé → AUCUNE normalisation, AUCUNE fusion, AUCUN traitement
-    # INTERDICTIONS EXPLICITES :
-    # - INTERDIT de recalculer les lignes à partir des règles courantes
-    # - INTERDIT de modifier la TVA entre devis et facture
-    # - INTERDIT de "corriger" les données du devis
-    # - INTERDIT toute normalisation de description
-    # - INTERDIT toute fusion de lignes
-    # - INTERDIT tout remapping de taux TVA
-    
-    if devis_fige:
-        # ============================================================
-        # DEVIS FIGÉ : Utiliser les lignes telles quelles (miroir exact du devis)
-        # ============================================================
-        # → Pas de normalisation (description conservée exactement, pas de strip/lower)
-        # → Pas de fusion (toutes les lignes conservées distinctes, même si descriptions similaires)
-        # → Pas de traitement intelligent (les lignes sont immuables)
-        # → Les lignes sont déjà figées dans le devis, aucune modification autorisée
-        # → Aucune logique métier intelligente n'est autorisée sur un devis figé
-        
-        lignes_normalisees = []
-        for i, ligne in enumerate(lignes_finales):
-            # Copie directe sans aucune modification
-            # ASSERTION : Les lignes doivent être identiques au devis
-            assert ligne.get('devis_fige', False), f"ERREUR: Ligne {i+1} devis figé sans flag devis_fige"
-            
-            # Vérifier que les valeurs correspondent exactement au devis
-            ligne_devis_originale = lignes_finales_devis[i]
-            assert ligne['description'] == ligne_devis_originale.description, \
-                f"ERREUR: Description modifiée ligne {i+1}"
-            assert ligne['quantite'] == ligne_devis_originale.quantite, \
-                f"ERREUR: Quantité modifiée ligne {i+1}"
-            assert ligne['unite'] == ligne_devis_originale.unite, \
-                f"ERREUR: Unité modifiée ligne {i+1}"
-            assert abs(ligne['ht_final'] - ligne_devis_originale.ht_apres_remise) < 0.01, \
-                f"ERREUR: HT modifié ligne {i+1} (facture: {ligne['ht_final']:.2f}, devis: {ligne_devis_originale.ht_apres_remise:.2f})"
-            assert abs(ligne['tva_taux'] - ligne_devis_originale.tva_taux) < 0.01, \
-                f"ERREUR: TVA modifiée ligne {i+1} (facture: {ligne['tva_taux']:.2f}%, devis: {ligne_devis_originale.tva_taux:.2f}%)"
-            
-            # Copie directe : les valeurs sont DÉFINITIVES
-            lignes_normalisees.append({
-                'description': ligne['description'],  # EXACTEMENT comme dans le devis (pas de normalisation)
-                'quantite': ligne['quantite'],        # Quantité FIGÉE
-                'unite': ligne['unite'],              # Unité FIGÉE
-                'ht_initial': ligne['ht_initial'],     # HT initial FIGÉ
-                'ht_final': ligne['ht_final'],        # HT final FIGÉ (DÉFINITIF - ne jamais recalculer)
-                'tva_taux': ligne['tva_taux'],        # TVA FIGÉE (DÉFINITIF - ne jamais modifier)
-                'description_detaillee': ligne.get('description_detaillee'),
-                'notes': ligne.get('notes'),
-                'deja_remise': ligne['deja_remise'],
-                'devis_fige': True
-            })
-        warnings = []  # Pas de warnings pour devis figé (les lignes sont immuables)
-        
-        # ASSERTION DE SÉCURITÉ : Vérifier qu'on a bien le même nombre de lignes
-        assert len(lignes_normalisees) == len(lignes_finales_devis), \
-            f"ERREUR: Nombre de lignes différent ({len(lignes_normalisees)} vs {len(lignes_finales_devis)})"
-    else:
-        # CAS NORMAL : Normalisation et fusion autorisées
-        # RÈGLE STRICTE : Fusion uniquement si description + TVA + unité identiques
-        # Clé de fusion : (description_norm, tva_taux, unite)
-        cles_fusion = {}  # {(desc_norm, tva_taux, unite): index}
-        lignes_normalisees = []
-        warnings = []  # Liste des warnings de cohérence métier
-        
-        for ligne in lignes_finales:
-            desc_norm = ligne['description'].strip().lower()
-            tva_taux = ligne['tva_taux']
-            unite = ligne['unite']
-            
-            # Clé de fusion : description + TVA + unité
-            cle_fusion = (desc_norm, tva_taux, unite)
-            
-            if cle_fusion in cles_fusion:
-                # Fusionner avec ligne existante (description + TVA + unité identiques)
-                index = cles_fusion[cle_fusion]
-                ligne_existante = lignes_normalisees[index]
-                
-                # Fusionner : additionner quantités et HT
-                ligne_existante['quantite'] += ligne['quantite']
-                ligne_existante['ht_final'] += ligne['ht_final']
-                ligne_existante['ht_initial'] += ligne['ht_initial']
-            else:
-                # Vérifier si description identique mais TVA ou unité différente (warning)
-                desc_similaire = False
-                for (desc_existante, tva_existante, unite_existante), index_existant in cles_fusion.items():
-                    if desc_existante == desc_norm and (tva_existante != tva_taux or unite_existante != unite):
-                        desc_similaire = True
-                        ligne_existante = lignes_normalisees[index_existant]
-                        warnings.append(
-                            f"Prestations similaires '{ligne['description']}' avec TVA/unité différentes : "
-                            f"TVA {tva_existante}%/{unite_existante} vs TVA {tva_taux}%/{unite} - "
-                            f"Lignes conservées distinctes"
-                        )
-                        break
-                
-                # Nouvelle ligne (description + TVA + unité unique)
-                cles_fusion[cle_fusion] = len(lignes_normalisees)
-                lignes_normalisees.append(ligne.copy())
-        
-        # Afficher les warnings si présents
-        if warnings:
-            print("⚠️ WARNINGS DE COHÉRENCE MÉTIER:")
-            for warning in warnings:
-                print(f"  - {warning}")
-    
-    # ============================================================
-    # ÉTAPE 3 : APPLIQUER ACOMPTE SI FACTURE D'ACOMPTE
-    # ============================================================
-    
-    # RÈGLE : L'acompte ne s'applique QUE pour les factures d'acompte
-    # Pour les factures finales issues d'un devis figé, on déduit l'acompte TTC après (étape 5)
-    # Les factures d'acompte sont des factures séparées qui ne modifient jamais les lignes du devis
-    if is_facture_acompte and taux_acompte is not None and taux_acompte > 0:
-        # Facture d'acompte : calculer l'acompte proportionnellement sur chaque ligne
-        # Note: Pour un devis figé, même l'acompte doit respecter les lignes du devis
-        for ligne in lignes_normalisees:
-            # Calculer l'acompte sur le HT figé (proportionnellement)
-            ligne['ht_final'] = ligne['ht_final'] * (taux_acompte / 100)
-            # La TVA sera recalculée sur ce HT d'acompte (étape 4)
-    
-    # ============================================================
-    # ÉTAPE 4 : CALCULER TVA LIGNE PAR LIGNE (source de vérité)
-    # ============================================================
-    
-    # RÈGLE ABSOLUE : TVA calculée uniquement comme ht_final × tva_taux
-    # Pour devis figé : le taux TVA est FIGÉ dans chaque ligne, jamais modifié
-    # → Utiliser directement le taux TVA de chaque ligne (aucun recalcul de taux)
-    # → Aucun remapping de taux, aucune redistribution
-    # → Le calcul est DÉTERMINISTE et REPRODUCTIBLE
-    
-    tva_par_taux = {}
-    for ligne in lignes_normalisees:
-        # TVA = ht_final × tva_taux (calcul unique et simple)
-        # Pour devis figé : tva_taux est DÉFINITIF, ht_final est DÉFINITIF
-        # → Le calcul est déterministe et reproductible
-        # → Même devis → même facture (hors acompte)
-        tva_ligne = ligne['ht_final'] * (ligne['tva_taux'] / 100)
-        tva_par_taux[ligne['tva_taux']] = tva_par_taux.get(ligne['tva_taux'], 0) + tva_ligne
-    
-    # ============================================================
-    # ÉTAPE 5 : CALCULER LES TOTAUX (somme des lignes uniquement)
-    # ============================================================
-    
-    # RÈGLE ABSOLUE : Les totaux sont UNIQUEMENT la somme des lignes
-    # → Total HT = somme(ht_ligne_final) des lignes
-    # → TVA = somme(tva_ligne) calculée ligne par ligne
-    # → Total TTC = Total HT + TVA
-    # → Aucun recalcul global, aucun ajustement, aucune correction
-    # → Interdiction absolue de recalculer la TVA à partir d'un autre total
-    
-    # Pour devis figé :
-    # - total_ht = somme(ht_ligne_final) des lignes du devis
-    # - total_tva = somme(tva_ligne) où tva_ligne = ht_ligne_final × tva_rate
-    # - total_ttc = total_ht + total_tva
-    # - Même devis ⇒ même facture (hors acompte)
-    
-    total_ht_initial = sum(ligne['ht_initial'] for ligne in lignes_normalisees)
-    total_ht_final = sum(ligne['ht_final'] for ligne in lignes_normalisees)
-    total_tva = sum(tva_par_taux.values())  # Somme des TVA par ligne (issue des lignes, pas recalculée)
-    total_ttc = total_ht_final + total_tva  # Total TTC = HT + TVA
-    
-    # Pour facture finale issue d'un devis figé avec acompte :
-    # Net à payer TTC = Total TTC devis figé - somme des acomptes TTC déjà facturés
-    # La TVA n'est JAMAIS recalculée après déduction de l'acompte
-    # → NE PAS recalculer la TVA
-    # → NE PAS déduire d'HT
-    # → Calculer uniquement : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-    
-    # Détecter si lignes déjà remisées
-    lignes_deja_remisees = any(ligne.get('deja_remise', False) for ligne in lignes_normalisees)
-    
-    # ============================================================
-    # ÉTAPE 6 : CONTRÔLES DE COHÉRENCE (OBLIGATOIRES)
-    # ============================================================
-    
-    # Vérifier que les totaux correspondent aux lignes
-    total_ht_verif = sum(ligne['ht_final'] for ligne in lignes_normalisees)
-    total_tva_verif = sum(ligne['ht_final'] * (ligne['tva_taux'] / 100) for ligne in lignes_normalisees)
-    
-    if abs(total_ht_final - total_ht_verif) > 0.01:
-        raise ValueError(f"ERREUR COHÉRENCE: total_ht_final ({total_ht_final}) != somme lignes ({total_ht_verif})")
-    
-    if abs(total_tva - total_tva_verif) > 0.01:
-        raise ValueError(f"ERREUR COHÉRENCE: total_tva ({total_tva}) != somme TVA lignes ({total_tva_verif})")
-    
-    if abs(total_ttc - (total_ht_final + total_tva)) > 0.01:
-        raise ValueError(f"ERREUR COHÉRENCE: total_ttc ({total_ttc}) != total_ht + total_tva ({total_ht_final + total_tva})")
-    
-    # ============================================================
-    # CONTRÔLE DE SÉCURITÉ : Facture finale issue d'un devis figé
-    # ============================================================
-    
-    # RÈGLE MÉTIER FONDAMENTALE : Même devis → même facture (hors acompte)
-    # Le moteur doit être DÉTERMINISTE, TRAÇABLE et FISCALLEMENT CONFORME
-    
-    if devis_fige and not is_facture_acompte:
-        # ============================================================
-        # VALIDATION STRICTE : Facture finale issue d'un devis figé
-        # ============================================================
-        # RÈGLE ABSOLUE : Facture TTC = Devis TTC − Acompte TTC (si présent)
-        # Les montants affichés correspondent EXACTEMENT aux lignes affichées
-        # Même devis ⇒ même facture (hors acompte)
-        
-        # Calculer le total TTC théorique du devis (pour validation)
-        # Formule : somme(ht_apres_remise × (1 + tva_taux / 100)) pour chaque ligne
-        total_ttc_theorique = sum(
-            ligne.ht_apres_remise * (1 + ligne.tva_taux / 100)
-            for ligne in lignes_finales_devis
-        )
-        
-        # CONTRÔLE DE SÉCURITÉ : Vérifier que le total TTC calculé correspond au total théorique
-        # Si facture issue d'un devis figé ET si total recalculé ≠ total devis
-        # → lever une erreur explicite
-        if abs(total_ttc - total_ttc_theorique) > 0.01:
-            raise ValueError(
-                f"ERREUR CRITIQUE - INCOHÉRENCE DEVIS/FACTURE:\n"
-                f"  Total TTC facture recalculé: {total_ttc:.2f} €\n"
-                f"  Total TTC devis (source de vérité): {total_ttc_theorique:.2f} €\n"
-                f"  Écart: {abs(total_ttc - total_ttc_theorique):.2f} €\n\n"
-                f"RÈGLE VIOLÉE: Une facture issue d'un devis figé doit avoir un total TTC identique (hors acompte).\n"
-                f"Un devis figé est une source de vérité ABSOLUE. Aucun recalcul n'est autorisé.\n"
-                f"Vérifiez que les lignes du devis sont reprises à l'identique sans modification."
-            )
-        
-        # Si un acompte a déjà été facturé, le net à payer sera différent
-        # mais le total TTC de base (avant déduction acompte) doit être identique
-        if acompte_ttc_deja_facture > 0:
-            # RÈGLE : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-            # → NE PAS recalculer la TVA
-            # → NE PAS répartir l'acompte en HT/TVA
-            net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-            
-            # Validation : net_a_payer_ttc doit être positif ou nul
-            if net_a_payer_ttc < 0:
-                raise ValueError(
-                    f"ERREUR VALIDATION ACOMPTE:\n"
-                    f"  Net à payer TTC: {net_a_payer_ttc:.2f} € (négatif)\n"
-                    f"  Total TTC: {total_ttc:.2f} €\n"
-                    f"  Acompte TTC déjà facturé: {acompte_ttc_deja_facture:.2f} €\n\n"
-                    f"L'acompte TTC dépasse le total TTC. Vérifiez les montants."
-                )
-    
-    return {
-        'lignes_normalisees': lignes_normalisees,
-        'total_ht_initial': total_ht_initial,
-        'total_ht_final': total_ht_final,
-        'tva_par_taux': tva_par_taux,
-        'total_tva': total_tva,
-        'total_ttc': total_ttc,
-        'lignes_deja_remisees': lignes_deja_remisees,
-        'acompte_ttc_deja_facture': acompte_ttc_deja_facture,
-        'is_facture_acompte': is_facture_acompte,
-        'devis_fige': devis_fige,  # Flag explicite : devis figé = source de vérité immuable
-        'warnings': warnings  # Warnings de cohérence métier (pas d'erreur, juste information)
-    }
-
-
-def calculer_lignes_devis_fige_strict(data):
-    """
-    MODE "DEVIS FIGÉ" STRICT - Source unique de vérité absolue
-    
-    RÈGLE MAÎTRE : Un devis accepté devient une source comptable IMMUTABLE.
-    La facture finale doit être une copie exacte du devis accepté.
-    
-    Si document_source == "devis_accepté" :
-    - INTERDICTION de modifier les lignes
-    - INTERDICTION de recalculer la TVA
-    - INTERDICTION de fusionner ou normaliser
-    - INTERDICTION de corriger unité / taux / description
-    
-    Cette fonction bypass complètement calculer_lignes_finales pour les devis figés.
-    Elle utilise DIRECTEMENT les champs figés du devis sans aucun traitement.
-    
-    Toute logique de :
-    - normalisation
-    - fusion
-    - recalcul TVA
-    - redistribution
-    est STRICTEMENT DÉSACTIVÉE dès qu'un devis est accepté.
-    
-    Retourne :
-    - lignes_normalisees : lignes du devis utilisées telles quelles
-    - total_ht_final : somme(ht_ligne) des lignes du devis
-    - total_tva : somme(tva_ligne) des lignes du devis
-    - total_ttc : total_ht + total_tva
-    - tva_par_taux : dictionnaire {taux: montant_tva} calculé à partir des lignes
-    - net_a_payer_ttc : total_ttc - acompte_ttc_deja_facture (si acompte)
-    - immutable_source : True (flag indiquant que la source est immuable)
-    """
-    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
-    acompte_ttc_deja_facture = getattr(data, 'acompte_ttc_deja_facture', 0) or 0
-    is_facture_acompte = getattr(data, 'is_facture_acompte', False)
-    taux_acompte = getattr(data, 'taux_acompte', None)
-    
-    # Flag immutable_source = true
-    immutable_source = True
-    
-    if not lignes_finales_devis or len(lignes_finales_devis) == 0:
-        raise ValueError("ERREUR: calculer_lignes_devis_fige_strict appelé sans lignes_finales_devis")
-    
-    # Log : Mode devis figé activé
-    print(f"🔒 MODE DEVIS FIGÉ STRICT ACTIVÉ - Source immuable (immutable_source={immutable_source})")
-    print(f"   Nombre de lignes du devis: {len(lignes_finales_devis)}")
-    print(f"   Toute modification est INTERDITE")
-    
-    # ============================================================
-    # UTILISER DIRECTEMENT LES CHAMPS FIGÉS DU DEVIS
-    # ============================================================
-    # RÈGLE MAÎTRE : Si document_source == "devis_accepté"
-    # - INTERDICTION de modifier les lignes
-    # - INTERDICTION de recalculer la TVA
-    # - INTERDICTION de fusionner ou normaliser
-    # - INTERDICTION de corriger unité / taux / description
-    
-    # NE PAS appeler calculer_lignes_finales
-    # NE PAS normaliser les descriptions
-    # NE PAS fusionner les lignes
-    # NE PAS recalculer les quantités
-    # NE PAS recalculer les prix unitaires
-    # NE PAS recalculer les taux de TVA
-    # NE PAS recalculer les HT ligne (sauf pour facture d'acompte proportionnelle)
-    
-    lignes_normalisees = []
-    tva_par_taux = {}
-    
-    for i, ligne_devis in enumerate(lignes_finales_devis):
-        # Utiliser DIRECTEMENT les champs figés du devis
-        # Les valeurs sont DÉFINITIVES et ne doivent JAMAIS être recalculées
-        
-        # Chaque ligne garde EXACTEMENT :
-        # - description
-        # - quantité
-        # - unité
-        # - PU HT (calculé à partir de ht_ligne / quantite)
-        # - taux TVA
-        # - HT ligne
-        
-        # Calculer tva_ligne à partir des champs figés
-        # Note: Si le devis a déjà tva_ligne calculé, on peut l'utiliser
-        # Sinon, on calcule: tva_ligne = ht_ligne × tva_taux / 100
-        ht_ligne = ligne_devis.ht_apres_remise
-        tva_taux = ligne_devis.tva_taux
-        tva_ligne = ht_ligne * (tva_taux / 100)
-        
-        # Calculer prix_unitaire_ht à partir de ht_ligne et quantite
-        prix_unitaire_ht = ht_ligne / ligne_devis.quantite if ligne_devis.quantite > 0 else 0
-        
-        # Cas facture d'acompte : appliquer le taux d'acompte proportionnellement
-        # (C'est la SEULE exception autorisée : calcul proportionnel pour acompte)
-        if is_facture_acompte and taux_acompte is not None and taux_acompte > 0:
-            ht_ligne_original = ht_ligne
-            ht_ligne = ht_ligne * (taux_acompte / 100)
-            tva_ligne = ht_ligne * (tva_taux / 100)  # TVA recalculée proportionnellement
-            prix_unitaire_ht = ht_ligne / ligne_devis.quantite if ligne_devis.quantite > 0 else 0
-            print(f"   Ligne {i+1}: Acompte {taux_acompte}% appliqué (HT: {ht_ligne_original:.2f} → {ht_ligne:.2f})")
-        
-        lignes_normalisees.append({
-            'description': ligne_devis.description,      # Description EXACTE (pas de normalisation)
-            'quantite': ligne_devis.quantite,            # Quantité FIGÉE
-            'unite': ligne_devis.unite,                   # Unité FIGÉE
-            'prix_unitaire_ht': prix_unitaire_ht,        # Calculé à partir de ht_ligne / quantite
-            'ht_initial': ligne_devis.ht_apres_remise,   # HT initial (avant acompte si facture d'acompte)
-            'ht_final': ht_ligne,                        # HT final (FIGÉ ou proportionnel si acompte)
-            'tva_taux': tva_taux,                        # TVA FIGÉE (ne jamais modifier)
-            'tva_ligne': tva_ligne,                      # TVA ligne (calculée à partir des champs figés)
-            'deja_remise': True,
-            'devis_fige': True
-        })
-        
-        # Grouper TVA par taux
-        tva_par_taux[tva_taux] = tva_par_taux.get(tva_taux, 0) + tva_ligne
-    
-    # ============================================================
-    # CALCUL DES TOTAUX (seule chose autorisée)
-    # ============================================================
-    # Les totaux sont calculés UNIQUEMENT comme :
-    # total_ht = somme(ht_lignes)
-    # total_tva = somme(tva_lignes)
-    # total_ttc = total_ht + total_tva
-    # Aucune autre logique n'est autorisée
-    
-    total_ht_final = sum(ligne['ht_final'] for ligne in lignes_normalisees)
-    total_tva = sum(ligne['tva_ligne'] for ligne in lignes_normalisees)
-    total_ttc = total_ht_final + total_tva
-    
-    print(f"   Totaux calculés (somme des lignes uniquement):")
-    print(f"     Total HT: {total_ht_final:.2f} €")
-    print(f"     Total TVA: {total_tva:.2f} €")
-    print(f"     Total TTC: {total_ttc:.2f} €")
-    
-    # ============================================================
-    # CAS FACTURE FINALE AVEC ACOMPTE
-    # ============================================================
-    # RÈGLE ABSOLUE : Le devis est figé, les totaux du devis sont immutables
-    # - Total HT du devis : INCHANGÉ
-    # - TVA par taux du devis : INCHANGÉE
-    # - Total TTC du devis : INCHANGÉ
-    # - L'acompte agit UNIQUEMENT sur le Net à payer
-    # - net_a_payer_ttc = total_ttc_devis - acompte_ttc_deja_facture
-    # - Aucun recalcul de HT ou de TVA après soustraction
-    
-    if not is_facture_acompte and acompte_ttc_deja_facture > 0:
-        # RÈGLE STRICTE : Simple soustraction TTC, aucun recalcul
-        net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-        print(f"💰 ACOMPTE - Calcul simple (devis figé):")
-        print(f"   Total TTC devis (IMMUTABLE): {total_ttc:.2f} €")
-        print(f"   Acompte TTC déjà facturé: {acompte_ttc_deja_facture:.2f} €")
-        print(f"   Net à payer TTC: {net_a_payer_ttc:.2f} €")
-        print(f"   ✅ Total HT, TVA par taux et Total TTC du devis restent INCHANGÉS")
-        
-        if net_a_payer_ttc < 0:
-            raise ValueError(
-                f"ERREUR VALIDATION ACOMPTE: "
-                f"Net à payer TTC ({net_a_payer_ttc:.2f} €) < 0. "
-                f"L'acompte TTC ({acompte_ttc_deja_facture:.2f} €) dépasse le total TTC ({total_ttc:.2f} €)."
-            )
-    else:
-        net_a_payer_ttc = total_ttc
-    
-    # ============================================================
-    # PROTECTION DURE : Vérifier que les lignes correspondent au devis
-    # ============================================================
-    # assert lignes_facture == lignes_devis (structure et valeurs)
-    # sinon lever une erreur bloquante
-    # Logs si tentative de modification bloquée
-    
-    assert len(lignes_normalisees) == len(lignes_finales_devis), \
-        f"❌ ERREUR CRITIQUE: Nombre de lignes différent ({len(lignes_normalisees)} vs {len(lignes_finales_devis)})"
-    
-    for i, (ligne_facture, ligne_devis) in enumerate(zip(lignes_normalisees, lignes_finales_devis)):
-        # Vérifier description
-        if ligne_facture['description'] != ligne_devis.description:
-            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: Description modifiée")
-            print(f"   Devis: '{ligne_devis.description}'")
-            print(f"   Facture: '{ligne_facture['description']}'")
-            raise ValueError(
-                f"ERREUR CRITIQUE ligne {i+1}: Description modifiée. "
-                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
-            )
-        
-        # Vérifier quantité
-        if ligne_facture['quantite'] != ligne_devis.quantite:
-            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: Quantité modifiée")
-            print(f"   Devis: {ligne_devis.quantite}")
-            print(f"   Facture: {ligne_facture['quantite']}")
-            raise ValueError(
-                f"ERREUR CRITIQUE ligne {i+1}: Quantité modifiée. "
-                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
-            )
-        
-        # Vérifier unité
-        if ligne_facture['unite'] != ligne_devis.unite:
-            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: Unité modifiée")
-            print(f"   Devis: '{ligne_devis.unite}'")
-            print(f"   Facture: '{ligne_facture['unite']}'")
-            raise ValueError(
-                f"ERREUR CRITIQUE ligne {i+1}: Unité modifiée. "
-                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
-            )
-        
-        # Vérifier HT (tolérance pour facture d'acompte)
-        if not (is_facture_acompte and taux_acompte):
-            if abs(ligne_facture['ht_final'] - ligne_devis.ht_apres_remise) >= 0.01:
-                print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: HT modifié")
-                print(f"   Devis: {ligne_devis.ht_apres_remise:.2f} €")
-                print(f"   Facture: {ligne_facture['ht_final']:.2f} €")
-                raise ValueError(
-                    f"ERREUR CRITIQUE ligne {i+1}: HT modifié. "
-                    f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
-                )
-        
-        # Vérifier TVA
-        if abs(ligne_facture['tva_taux'] - ligne_devis.tva_taux) >= 0.01:
-            print(f"❌ TENTATIVE DE MODIFICATION BLOQUÉE ligne {i+1}: TVA modifiée")
-            print(f"   Devis: {ligne_devis.tva_taux:.2f}%")
-            print(f"   Facture: {ligne_facture['tva_taux']:.2f}%")
-            raise ValueError(
-                f"ERREUR CRITIQUE ligne {i+1}: TVA modifiée. "
-                f"Un devis accepté est IMMUTABLE. Toute modification est INTERDITE."
-            )
-    
-    print(f"✅ Validation OK: Toutes les lignes correspondent exactement au devis accepté")
-    
-    # OBJECTIF FINAL : Même devis accepté → même facture → mêmes totaux → toujours.
-    print(f"✅ MODE DEVIS FIGÉ STRICT TERMINÉ - Source immuable respectée")
-    
-    # RÈGLE ABSOLUE : Les totaux du devis sont IMMUTABLES
-    # total_ht_final, tva_par_taux, total_ttc ne changent JAMAIS, même avec acompte
-    # seul net_a_payer_ttc dépend de l'acompte
-    
-    return {
-        'lignes_normalisees': lignes_normalisees,
-        'total_ht_initial': total_ht_final,  # Pour devis figé, ht_initial = ht_final (déjà remisé)
-        'total_ht_final': total_ht_final,  # IMMUTABLE - Total HT du devis (ne change jamais)
-        'tva_par_taux': tva_par_taux,  # IMMUTABLE - TVA par taux du devis (ne change jamais)
-        'total_tva': total_tva,  # IMMUTABLE - Total TVA du devis (ne change jamais)
-        'total_ttc': total_ttc,  # IMMUTABLE - Total TTC du devis (ne change jamais)
-        'net_a_payer_ttc': net_a_payer_ttc,  # Seul calcul : total_ttc - acompte_ttc_deja_facture
-        'lignes_deja_remisees': True,
-        'acompte_ttc_deja_facture': acompte_ttc_deja_facture,
-        'is_facture_acompte': is_facture_acompte,
-        'devis_fige': True,
-        'immutable_source': immutable_source,  # Flag indiquant que la source est immuable
-        'warnings': []  # Pas de warnings pour devis figé
-    }
-
-
-def dessiner_tableau_prestations(c, width, data, y_table, tva_taux_global):
-    """
-    Dessine le tableau des prestations pour une facture avec totaux - TVA par ligne
-    
-    MODE "DEVIS FIGÉ" STRICT :
-    Si devis_fige == True, utilise calculer_lignes_devis_fige_strict au lieu de calculer_lignes_finales.
-    """
-    # Détecter si c'est un devis figé
-    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
-    devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
-    
-    # Log pour diagnostic
-    if devis_fige:
-        print(f"🔒 MODE DEVIS FIGÉ DÉTECTÉ dans dessiner_tableau_prestations")
-        print(f"   Nombre de lignes_finales_devis: {len(lignes_finales_devis)}")
-        print(f"   TVA par ligne:", [f"{l.tva_taux}%" for l in lignes_finales_devis])
-    else:
-        print(f"⚠️ MODE NORMAL - lignes_finales_devis non présent ou vide")
-        print(f"   lignes_finales_devis: {lignes_finales_devis}")
-    
-    # ============================================================
-    # BRANCHE EXPLICITE : MODE "DEVIS FIGÉ" STRICT
-    # ============================================================
-    if devis_fige:
-        # NE PAS appeler calculer_lignes_finales
-        # Utiliser directement calculer_lignes_devis_fige_strict
-        print(f"✅ Utilisation de calculer_lignes_devis_fige_strict (bypass calculer_lignes_finales)")
-        resultats = calculer_lignes_devis_fige_strict(data)
-    else:
-        # Cas normal : utiliser calculer_lignes_finales
-        print(f"⚠️ Utilisation de calculer_lignes_finales (mode normal)")
-        resultats = calculer_lignes_finales(data, tva_taux_global)
-    
-    lignes_normalisees = resultats['lignes_normalisees']
-    total_ht_initial = resultats['total_ht_initial']
-    total_ht_final = resultats['total_ht_final']
-    tva_par_taux = resultats['tva_par_taux']  # Déjà mis à jour avec TVA restantes si ventilation
-    total_tva = resultats['total_tva']  # Déjà mis à jour avec TVA restante si ventilation
-    total_ttc = resultats['total_ttc']  # Total TTC initial (avant déduction acompte)
-    net_a_payer_ttc = resultats.get('net_a_payer_ttc', total_ttc)  # Utiliser le net calculé (avec ventilation si multi-TVA)
-    lignes_deja_remisees = resultats['lignes_deja_remisees']
-    acompte_ttc_deja_facture = resultats['acompte_ttc_deja_facture']
-    is_facture_acompte = resultats['is_facture_acompte']
-    devis_fige = resultats['devis_fige']  # Flag explicite : devis figé = contractuel
-    
-    # NOTE : net_a_payer_ttc est déjà calculé correctement dans calculer_lignes_devis_fige_strict
-    # avec ventilation proportionnelle si multi-TVA, donc on l'utilise directement
-    
-    # En-tête du tableau
-    c.setFillColor(get_couleur_principale(data))
-    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
-    
-    c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(18*mm, y_table + 3*mm, "Description")
-    c.drawString(90*mm, y_table + 3*mm, "Qté")
-    c.drawString(105*mm, y_table + 3*mm, "Unité")
-    c.drawString(125*mm, y_table + 3*mm, "P.U. HT")
-    c.drawString(150*mm, y_table + 3*mm, "TVA")
-    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
-    
-    y_ligne = y_table - 2*mm
-    
-    # Afficher les lignes
-    for i, ligne in enumerate(lignes_normalisees):
-        # Calculer la hauteur nécessaire pour cette ligne
-        description_detaillee = ligne.get('description_detaillee', '')
-        notes = ligne.get('notes', '')
-        
-        # Hauteur de base : 10mm, +4mm par ligne supplémentaire
-        hauteur_ligne = 10*mm
-        if description_detaillee and description_detaillee.strip():
-            hauteur_ligne += 4*mm
-        if notes and notes.strip():
-            hauteur_ligne += 4*mm
-        
-        y_ligne -= hauteur_ligne
-        
-        # Alterner couleurs
-        if i % 2 == 0:
-            c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne - 2*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
-        
-        c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica-Bold", 9)
-        
-        # Position Y pour le texte (en haut de la cellule)
-        y_texte = y_ligne + hauteur_ligne - 8*mm
-        
-        # Description principale
-        c.drawString(18*mm, y_texte, tronquer_texte(ligne['description'], 50))
-        
-        # Description détaillée (en dessous, plus petite, gris)
-        if description_detaillee and description_detaillee.strip():
-            y_texte -= 4*mm
-            c.setFont("Helvetica", 7)
-            c.setFillColor(HexColor('#666666'))
-            c.drawString(18*mm, y_texte, tronquer_texte(description_detaillee, 60))
-        
-        # Notes (en dessous, italique, gris clair)
-        if notes and notes.strip():
-            y_texte -= 4*mm
-            c.setFont("Helvetica-Oblique", 7)
-            c.setFillColor(HexColor('#888888'))
-            c.drawString(18*mm, y_texte, f"Note: {tronquer_texte(notes, 55)}")
-        
-        # Remettre la couleur et police pour les autres colonnes
-        c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica", 9)
-        
-        # Quantité, Unité, Prix (alignés en haut)
-        y_autres = y_ligne + hauteur_ligne - 8*mm
-        c.drawString(90*mm, y_autres, str(ligne['quantite']))
-        c.drawString(105*mm, y_autres, ligne['unite'])
-        
-        # Prix unitaire affiché (calculé depuis ht_initial - AVANT remise)
-        ht_pour_affichage = ligne.get('ht_initial', ligne['ht_final'])
-        prix_unitaire = ht_pour_affichage / ligne['quantite'] if ligne['quantite'] > 0 else 0
-        c.drawString(125*mm, y_autres, f"{prix_unitaire:.2f} €")
-        c.drawString(150*mm, y_autres, f"{ligne['tva_taux']:.1f}%")
-        c.drawRightString(width - 18*mm, y_autres, f"{ht_pour_affichage:.2f} €")
-    
-    y_ligne -= 5*mm
-    
-    # Ligne de séparation
-    c.setStrokeColor(GRIS_CLAIR)
-    c.setLineWidth(1)
-    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
-    
-    y_totaux = y_ligne - 10*mm
-    
-    # Afficher les totaux
-    x_label = 130*mm
-    x_value = width - 18*mm
-    c.setFillColor(GRIS_FONCE)
-    c.setFont("Helvetica", 10)
-    
-    y_offset = 0
-    
-    # Calculer la remise pour l'affichage
-    remise_type = getattr(data, 'remise_type', None)
-    remise_valeur = getattr(data, 'remise_valeur', 0) or 0
-    
-    if remise_type == "pourcentage" and remise_valeur > 0:
-        remise_montant = total_ht_initial * (remise_valeur / 100)
-    elif remise_type in ["montant", "fixe"] and remise_valeur > 0:
-        remise_montant = remise_valeur
-    else:
-        remise_montant = 0
-    
-    # Afficher Total HT (avant remise si remise présente)
-    if remise_montant > 0 and not devis_fige:
-        c.drawString(x_label, y_totaux, "Total HT avant remise")
-        c.drawRightString(x_value, y_totaux, f"{total_ht_initial:.2f} €")
-        y_offset = 6*mm
-        
-        # Afficher la remise
-        if remise_type == "pourcentage" and remise_valeur:
-            c.drawString(x_label, y_totaux - y_offset, f"Remise ({remise_valeur}%)")
-        else:
-            c.drawString(x_label, y_totaux - y_offset, "Remise")
-        c.setFillColor(HexColor('#e74c3c'))
-        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_montant:.2f} €")
-        c.setFillColor(GRIS_FONCE)
-        y_offset += 6*mm
-        
-        # Total HT après remise
-        c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
-        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_final:.2f} €")
+    if tva_taux > 0:
+        c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
         y_offset += 6*mm
     else:
-        # Pas de remise ou devis figé : afficher juste Total HT
-        c.drawString(x_label, y_totaux, "Total HT")
-        c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
-        y_offset = 6*mm
-    
-    # Afficher TVA par taux
-    for taux in sorted(tva_par_taux.keys()):
-        montant = tva_par_taux[taux]
-        if taux > 0:
-            c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
-            c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
-            y_offset += 6*mm
-        elif len(tva_par_taux) == 1:
-            c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
-            y_offset += 6*mm
+        c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+        y_offset += 6*mm
     
     # Total TTC
+    c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
     c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc:.2f} €")
-    y_offset += 6*mm
     
-    # Facture finale issue d'un devis figé : acompte et net à payer
-    # RÈGLE ABSOLUE : NE PAS recalculer la TVA, NE PAS déduire d'HT
-    # → Calculer uniquement : net_a_payer_ttc = total_ttc - acompte_ttc_deja_facture
-    if not is_facture_acompte and acompte_ttc_deja_facture > 0:
-        # Ligne de séparation visuelle avant l'acompte
-        y_offset += 3*mm
-        c.setStrokeColor(HexColor('#e0e0e0'))
-        c.setLineWidth(0.5)
-        c.line(x_label - 5*mm, y_totaux - y_offset, x_value + 5*mm, y_totaux - y_offset)
-        y_offset += 4*mm
-        
-        # Libellé de l'acompte (sans référence dans le libellé principal)
-        c.setFont("Helvetica-Bold", 10)
-        c.setFillColor(GRIS_FONCE)
-        c.drawString(x_label, y_totaux - y_offset, "Acompte déjà facturé")
-        
-        # Montant de l'acompte en rouge, gras et plus grand pour visibilité maximale
-        c.setFillColor(HexColor('#e74c3c'))
-        c.setFont("Helvetica-Bold", 12)
-        c.drawRightString(x_value, y_totaux - y_offset, f"- {acompte_ttc_deja_facture:.2f} €")
-        y_offset += 5*mm
-        
-        # Référence(s) de l'acompte sur une ligne séparée en plus petit
-        acompte_references = getattr(data, 'acompte_references', None)
-        if acompte_references and len(acompte_references) > 0:
-            references_str = ', '.join(acompte_references)
-            c.setFont("Helvetica", 8)
-            c.setFillColor(HexColor('#666666'))
-            c.drawString(x_label, y_totaux - y_offset, f"Référence(s): {references_str}")
-            y_offset += 4*mm
-        else:
-            y_offset += 2*mm
-        
-        c.setFillColor(GRIS_FONCE)
-        
-        # Encadré pour "NET À PAYER TTC"
-        c.setFont("Helvetica-Bold", 12)
-        c.setFillColor(get_couleur_principale(data))
-        c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
-        c.setFillColor(white)
-        c.drawString(x_label, y_totaux - y_offset - 5*mm, "NET À PAYER TTC")
-        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{net_a_payer_ttc:.2f} €")
-        y_offset += 6*mm
-    
-    return y_totaux - y_offset - 5*mm, total_ht_final, net_a_payer_ttc if not is_facture_acompte and acompte_ttc_deja_facture > 0 else total_ttc
+    return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc
 
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
@@ -1785,12 +999,26 @@ def dessiner_pied_page(c, width, data, mention_tva=""):
     c.drawRightString(width - 15*mm, 8*mm, "Généré par Vocario.fr")
 
 
-def generer_pdf_devis(data: DevisRequest) -> str:
-    # Utiliser le numéro fourni par le frontend, sinon en générer un
-    if hasattr(data, 'numero_devis') and data.numero_devis and str(data.numero_devis).strip():
-        numero_devis = data.numero_devis
+def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = None) -> str:
+    # PRIORITÉ 1: Utiliser le numéro forcé (paramètre explicite)
+    # PRIORITÉ 2: Utiliser le numéro fourni dans data.numero_devis
+    # PRIORITÉ 3: Générer un nouveau numéro (ne devrait jamais arriver)
+    
+    if numero_devis_force and str(numero_devis_force).strip():
+        numero_devis = str(numero_devis_force).strip()
+        print(f"✅ Utilisation du numéro de devis FORCÉ (paramètre): '{numero_devis}'")
+    elif data.numero_devis and str(data.numero_devis).strip():
+        numero_devis = str(data.numero_devis).strip()
+        print(f"✅ Utilisation du numéro de devis fourni dans data: '{numero_devis}'")
     else:
+        # Si aucun numéro n'est fourni, c'est une erreur critique
         numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+        print(f"❌ ERREUR CRITIQUE: numero_devis non fourni ou vide!")
+        print(f"   - numero_devis_force = '{numero_devis_force}'")
+        print(f"   - data.numero_devis = '{data.numero_devis}'")
+        print(f"   - Génération d'un nouveau numéro (ce ne devrait pas arriver): {numero_devis}")
+        print(f"⚠️ ATTENTION: Le numéro généré ({numero_devis}) ne correspondra pas au numéro en base de données!")
+    
     filename = f"{numero_devis}.pdf"
     filepath = os.path.join(PDF_FOLDER, filename)
     
@@ -1801,69 +1029,75 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # Détecter si c'est un devis figé
-    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
-    devis_fige = (lignes_finales_devis and len(lignes_finales_devis) > 0)
+    # Calculer les totaux globaux sur toutes les prestations
+    total_ht_avant_acompte = 0
+    total_acompte = 0
+    for prestation in data.prestations:
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        if total_ligne >= 0:
+            total_ht_avant_acompte += total_ligne
+        else:
+            total_acompte += abs(total_ligne)
     
-    # Log pour diagnostic
-    if devis_fige:
-        print(f"🔒 MODE DEVIS FIGÉ DÉTECTÉ dans generer_pdf_devis")
-        print(f"   Nombre de lignes_finales_devis: {len(lignes_finales_devis)}")
-        print(f"   TVA par ligne:", [f"{l.tva_taux}%" for l in lignes_finales_devis])
-    else:
-        print(f"⚠️ MODE NORMAL dans generer_pdf_devis - lignes_finales_devis non présent")
-    
-    # ============================================================
-    # BRANCHE EXPLICITE : MODE "DEVIS FIGÉ" STRICT
-    # ============================================================
-    if devis_fige:
-        # NE PAS appeler calculer_lignes_finales
-        # Utiliser directement calculer_lignes_devis_fige_strict
-        print(f"✅ Utilisation de calculer_lignes_devis_fige_strict (bypass calculer_lignes_finales)")
-        resultats = calculer_lignes_devis_fige_strict(data)
-    else:
-        # Cas normal : utiliser calculer_lignes_finales
-        print(f"⚠️ Utilisation de calculer_lignes_finales (mode normal)")
-        tva_taux_global = getattr(data, 'tva_taux', 20.0)
-        resultats = calculer_lignes_finales(data, tva_taux_global)
-    
-    lignes_normalisees = resultats['lignes_normalisees']
-    total_ht_initial = resultats['total_ht_initial']
-    total_ht_final = resultats['total_ht_final']
-    tva_par_taux = resultats['tva_par_taux']
-    total_tva = resultats['total_tva']
-    total_ttc = resultats['total_ttc']
-    lignes_deja_remisees = resultats['lignes_deja_remisees']
-    
-    # Calcul de la remise à partir des données du devis
+    # Calcul de la remise directement à partir de data.remise_type et data.remise_valeur
     remise_type = getattr(data, 'remise_type', None)
     remise_valeur = getattr(data, 'remise_valeur', 0) or 0
-
+    
+    # Normaliser remise_type
+    if remise_type:
+        remise_type = str(remise_type).strip()
+        if remise_type == "" or remise_type.lower() == "none":
+            remise_type = None
+    
+    # Convertir remise_valeur en nombre
+    try:
+        remise_valeur = float(remise_valeur)
+    except (ValueError, TypeError):
+        remise_valeur = 0
+    
+    # Calculer remise_totale à partir de remise_type et remise_valeur
     if remise_type == "pourcentage" and remise_valeur > 0:
-        remise_totale = total_ht_initial * (remise_valeur / 100)
+        remise = total_ht_avant_acompte * (remise_valeur / 100)
+        print(f"✅ Remise pourcentage calculée: {remise:.2f} € ({remise_valeur}% de {total_ht_avant_acompte:.2f})")
     elif remise_type in ["montant", "fixe"] and remise_valeur > 0:
-        remise_totale = remise_valeur
+        remise = remise_valeur
+        print(f"✅ Remise montant calculée: {remise:.2f} €")
     else:
-        remise_totale = 0
+        remise = 0
+        if remise_type:
+            print(f"⚠️ Remise_type défini ('{remise_type}') mais remise_valeur invalide: {remise_valeur}")
+        else:
+            print(f"ℹ️ Pas de remise définie")
     
-    # Pagination : diviser les lignes normalisées en groupes
+    # Appliquer la remise, puis déduire l'acompte
+    total_ht_apres_remise = total_ht_avant_acompte - remise
+    total_ht_final = total_ht_apres_remise - total_acompte
+    montant_tva = total_ht_final * (data.tva_taux / 100)
+    total_ttc = total_ht_final + montant_tva
+    total_ht = total_ht_avant_acompte  # Pour l'affichage
+    
+    # Stocker la remise dans data pour qu'elle soit accessible dans dessiner_totaux
+    # On utilise une approche différente : on va passer les valeurs directement
+    print(f"📋 Données finales - remise: {remise:.2f}, remise_type dans data: '{getattr(data, 'remise_type', None)}', remise_valeur dans data: {getattr(data, 'remise_valeur', None)}")
+    
+    # Pagination : diviser les prestations en groupes
     lignes_par_page = 11  # Nombre de lignes par page
-    groupes_lignes = []
-    for i in range(0, len(lignes_normalisees), lignes_par_page):
-        groupes_lignes.append(lignes_normalisees[i:i + lignes_par_page])
+    prestations_groupes = []
+    for i in range(0, len(data.prestations), lignes_par_page):
+        prestations_groupes.append(data.prestations[i:i + lignes_par_page])
     
-    # Si aucune ligne, créer au moins une page vide
-    if not groupes_lignes:
-        groupes_lignes = [[]]
+    # Si aucune prestation, créer au moins une page vide
+    if not prestations_groupes:
+        prestations_groupes = [[]]
     
     mention_tva = ""
     if data.tva_taux == 0:
         mention_tva = "TVA non applicable, article 293 B du Code général des impôts"
     
-    # Dessiner chaque groupe de lignes
-    for page_num, groupe_lignes in enumerate(groupes_lignes):
+    # Dessiner chaque groupe de prestations
+    for page_num, groupe_prestations in enumerate(prestations_groupes):
         est_premiere_page = (page_num == 0)
-        est_derniere_page = (page_num == len(groupes_lignes) - 1)
+        est_derniere_page = (page_num == len(prestations_groupes) - 1)
         
         # Dessiner l'en-tête de page
         dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite)
@@ -1883,17 +1117,19 @@ def generer_pdf_devis(data: DevisRequest) -> str:
             # Sur les pages suivantes, le tableau commence plus haut
             y_table = height - 55*mm
         
-        # Dessiner les lignes de prestations (utiliser les lignes normalisées)
+        # Dessiner les lignes de prestations
         index_debut = page_num * lignes_par_page
-        groupe_lignes_page = groupe_lignes
-        y_totaux_tableau = dessiner_lignes_normalisees(c, width, groupe_lignes_page, y_table, data, index_debut)
+        y_totaux_tableau, _, _ = dessiner_lignes_prestations(c, width, groupe_prestations, y_table, data, index_debut)
         
         # Si dernière page, dessiner les totaux, signature et conditions
         if est_derniere_page:
             y_totaux = y_totaux_tableau
             
-            # Dessiner les totaux (utiliser les résultats de calculer_lignes_finales)
-            y_fin_totaux = dessiner_totaux_devis(c, width, y_totaux, total_ht_initial, total_ht_final, remise_totale, tva_par_taux, total_ttc, data, lignes_deja_remisees)
+            # Log avant dessiner_totaux pour vérifier les valeurs
+            print(f"📊 AVANT dessiner_totaux - remise: {remise:.2f}, remise_type: '{getattr(data, 'remise_type', None)}', remise_valeur: {getattr(data, 'remise_valeur', None)}")
+            
+            # Dessiner les totaux
+            y_fin_totaux = dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, data.tva_taux, total_ht_final, total_ttc, data)
             
             # Bloc signature À GAUCHE (au niveau des totaux)
             y_signature = y_totaux - 5*mm
@@ -1964,8 +1200,26 @@ def generer_pdf_devis(data: DevisRequest) -> str:
     return filepath, numero_devis, total_ht_final, total_ttc
 
 
-def generer_pdf_facture(data: FactureRequest) -> str:
-    numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+def generer_pdf_facture(data: FactureRequest, numero_facture_force: Optional[str] = None) -> str:
+    # PRIORITÉ 1: Utiliser le numéro forcé (paramètre explicite)
+    # PRIORITÉ 2: Utiliser le numéro fourni dans data.numero_facture
+    # PRIORITÉ 3: Générer un nouveau numéro (ne devrait jamais arriver)
+    
+    if numero_facture_force and str(numero_facture_force).strip():
+        numero_facture = str(numero_facture_force).strip()
+        print(f"✅ Facture PDF - Utilisation du numéro FORCÉ (paramètre): '{numero_facture}'")
+    elif data.numero_facture and str(data.numero_facture).strip():
+        numero_facture = str(data.numero_facture).strip()
+        print(f"✅ Facture PDF - Utilisation du numéro fourni dans data: '{numero_facture}'")
+    else:
+        # Si aucun numéro n'est fourni, c'est une erreur critique
+        numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+        print(f"❌ ERREUR CRITIQUE: numero_facture non fourni ou vide!")
+        print(f"   - numero_facture_force = '{numero_facture_force}'")
+        print(f"   - data.numero_facture = '{data.numero_facture}'")
+        print(f"   - Génération d'un nouveau numéro (ce ne devrait pas arriver): {numero_facture}")
+        print(f"⚠️ ATTENTION: Le numéro généré ({numero_facture}) ne correspondra pas au numéro en base de données!")
+    
     filename = f"{numero_facture}.pdf"
     filepath = os.path.join(PDF_FOLDER, filename)
     
@@ -2095,13 +1349,22 @@ def set_cell_shading(cell, color):
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color}"/>')
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
-def generer_word_devis(data: DevisRequest) -> str:
+def generer_word_devis(data: DevisRequest, numero_devis_force: Optional[str] = None) -> str:
     """Génère un devis au format Word"""
-    # Utiliser le numéro fourni par le frontend, sinon en générer un
-    if hasattr(data, 'numero_devis') and data.numero_devis and str(data.numero_devis).strip():
-        numero_devis = data.numero_devis
+    # PRIORITÉ 1: Utiliser le numéro forcé (paramètre explicite)
+    # PRIORITÉ 2: Utiliser le numéro fourni dans data.numero_devis
+    # PRIORITÉ 3: Générer un nouveau numéro (ne devrait jamais arriver)
+    
+    if numero_devis_force and str(numero_devis_force).strip():
+        numero_devis = str(numero_devis_force).strip()
+        print(f"✅ Word - Utilisation du numéro de devis FORCÉ (paramètre): '{numero_devis}'")
+    elif data.numero_devis and str(data.numero_devis).strip():
+        numero_devis = str(data.numero_devis).strip()
+        print(f"✅ Word - Utilisation du numéro de devis fourni dans data: '{numero_devis}'")
     else:
         numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+        print(f"⚠️ Word - numero_devis non fourni ou vide, génération d'un nouveau numéro: {numero_devis}")
+    
     filename = f"{numero_devis}.docx"
     filepath = os.path.join(PDF_FOLDER, filename)
     
@@ -2272,9 +1535,22 @@ def generer_word_devis(data: DevisRequest) -> str:
     return filepath, numero_devis, total_ht, total_ttc
 
 
-def generer_word_facture(data: FactureRequest) -> str:
+def generer_word_facture(data: FactureRequest, numero_facture_force: Optional[str] = None) -> str:
     """Génère une facture au format Word"""
-    numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    # PRIORITÉ 1: Utiliser le numéro forcé (paramètre explicite)
+    # PRIORITÉ 2: Utiliser le numéro fourni dans data.numero_facture
+    # PRIORITÉ 3: Générer un nouveau numéro (ne devrait jamais arriver)
+    
+    if numero_facture_force and str(numero_facture_force).strip():
+        numero_facture = str(numero_facture_force).strip()
+        print(f"✅ Facture Word - Utilisation du numéro FORCÉ (paramètre): '{numero_facture}'")
+    elif data.numero_facture and str(data.numero_facture).strip():
+        numero_facture = str(data.numero_facture).strip()
+        print(f"✅ Facture Word - Utilisation du numéro fourni dans data: '{numero_facture}'")
+    else:
+        numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+        print(f"⚠️ Facture Word - numero_facture non fourni ou vide, génération d'un nouveau numéro: {numero_facture}")
+    
     filename = f"{numero_facture}.docx"
     filepath = os.path.join(PDF_FOLDER, filename)
     
@@ -2456,41 +1732,95 @@ def root():
 @app.post("/generer-devis")
 async def generer_devis_endpoint(data: DevisRequest):
     try:
+        # IMPORTANT: Récupérer le numéro AVANT toute autre opération
+        # Si Pydantic n'a pas reçu le champ, il sera None
+        numero_devis_recu = None
+        
+        # Essayer de récupérer depuis data.numero_devis
+        if hasattr(data, 'numero_devis') and data.numero_devis:
+            numero_devis_recu = str(data.numero_devis).strip()
+            print(f"✅ Numéro de devis récupéré depuis data.numero_devis: '{numero_devis_recu}'")
+        else:
+            print(f"❌ ERREUR: data.numero_devis est None ou vide!")
+            print(f"   - data.numero_devis = '{data.numero_devis}'")
+            print(f"   - Type: {type(data.numero_devis)}")
+            print(f"   - hasattr(data, 'numero_devis'): {hasattr(data, 'numero_devis')}")
+            raise HTTPException(status_code=400, detail="Le numéro de devis est obligatoire et n'a pas été fourni dans la requête")
+        
+        if not numero_devis_recu or not numero_devis_recu.strip():
+            print(f"❌ ERREUR CRITIQUE: Numéro de devis vide après traitement!")
+            raise HTTPException(status_code=400, detail="Le numéro de devis est obligatoire")
+        
         print(f"📄 Début génération devis pour client: {data.client.nom}")
         print(f"📊 Nombre de prestations: {len(data.prestations)}")
         print(f"🎨 Couleur PDF: {data.entreprise.couleur_pdf or 'défaut'}")
+        print(f"📋 Numéro de devis à utiliser: '{numero_devis_recu}'")
+        print(f"💰 Remise - type: '{data.remise_type}', valeur: {data.remise_valeur}, type valeur: {type(data.remise_valeur)}")
         
-        # Générer PDF
+        # FORCER l'utilisation du numéro reçu en mettant à jour data.numero_devis
+        # Utiliser model_copy pour Pydantic v2 ou copy pour v1
+        try:
+            if hasattr(data, 'model_copy'):
+                data = data.model_copy(update={'numero_devis': numero_devis_recu})
+            else:
+                data.numero_devis = numero_devis_recu
+            print(f"✅ data.numero_devis mis à jour avec: '{data.numero_devis}'")
+        except Exception as e:
+            print(f"⚠️ Impossible de mettre à jour data.numero_devis: {e}")
+            # Créer un nouveau dict avec le numéro forcé
+            data_dict = data.model_dump() if hasattr(data, 'model_dump') else data.dict()
+            data_dict['numero_devis'] = numero_devis_recu
+            data = DevisRequest(**data_dict)
+            print(f"✅ data recréé avec numero_devis: '{data.numero_devis}'")
+        
+        # Générer PDF avec le numéro FORCÉ (paramètre explicite)
         print("📝 Génération PDF...")
-        filepath_pdf, numero_devis, total_ht, total_ttc = generer_pdf_devis(data)
+        filepath_pdf, numero_devis_pdf, total_ht, total_ttc = generer_pdf_devis(data, numero_devis_force=numero_devis_recu)
         print(f"✅ PDF généré: {filepath_pdf}")
+        print(f"📋 Numéro de devis utilisé dans PDF: '{numero_devis_pdf}'")
+        print(f"📋 Numéro de devis reçu initialement: '{numero_devis_recu}'")
         
-        # Générer Word
+        # Le numéro utilisé DOIT correspondre au numéro reçu (on l'a forcé)
+        if numero_devis_pdf != numero_devis_recu:
+            print(f"❌ ERREUR CRITIQUE: Le numéro utilisé ({numero_devis_pdf}) diffère du numéro reçu ({numero_devis_recu})")
+            print(f"   - Le PDF contient probablement le mauvais numéro!")
+            # Renommer le fichier PDF pour correspondre au bon numéro
+            correct_pdf_path = os.path.join(PDF_FOLDER, f"{numero_devis_recu}.pdf")
+            if os.path.exists(filepath_pdf) and filepath_pdf != correct_pdf_path:
+                print(f"🔄 Renommage du PDF de '{filepath_pdf}' vers '{correct_pdf_path}'")
+                os.rename(filepath_pdf, correct_pdf_path)
+                filepath_pdf = correct_pdf_path
+            numero_devis_final = numero_devis_recu
+        else:
+            numero_devis_final = numero_devis_pdf
+            print(f"✅ Le numéro de devis est cohérent: {numero_devis_final}")
+        
+        # Générer Word avec le numéro FORCÉ (paramètre explicite)
         print("📝 Génération Word...")
-        filepath_word, _, _, _ = generer_word_devis(data)
-        # Renommer le Word pour avoir le même numéro
-        new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis}.docx")
+        filepath_word, numero_devis_word, _, _ = generer_word_devis(data, numero_devis_force=numero_devis_recu)
+        # Renommer le Word pour avoir le même numéro que le PDF
+        new_word_path = os.path.join(PDF_FOLDER, f"{numero_devis_final}.docx")
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
             os.rename(filepath_word, new_word_path)
         print(f"✅ Word généré: {new_word_path}")
         
         # Upload sur Supabase Storage
         print("📤 Upload PDF sur Supabase...")
-        pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
+        pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis_final}.pdf")
         print(f"✅ PDF uploadé: {pdf_url}")
         
         print("📤 Upload Word sur Supabase...")
-        word_url = upload_to_supabase(new_word_path, f"{numero_devis}.docx")
+        word_url = upload_to_supabase(new_word_path, f"{numero_devis_final}.docx")
         print(f"✅ Word uploadé: {word_url}")
         
         return {
             "success": True,
-            "numero_devis": numero_devis,
+            "numero_devis": numero_devis_final,  # IMPORTANT: Retourner le numéro final (celui du dashboard)
             "total_ht": total_ht,
             "total_ttc": total_ttc,
-            "pdf_filename": f"{numero_devis}.pdf",
+            "pdf_filename": f"{numero_devis_final}.pdf",
             "pdf_url": pdf_url,
-            "word_filename": f"{numero_devis}.docx",
+            "word_filename": f"{numero_devis_final}.docx",
             "word_url": word_url
         }
     except Exception as e:
@@ -2519,7 +1849,8 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
             delai_realisation=data.devis_data.delai,
             validite_jours=data.validite_jours,
             remise_type=data.devis_data.remise_type,
-            remise_valeur=data.devis_data.remise_valeur or 0
+            remise_valeur=data.devis_data.remise_valeur or 0,
+            numero_devis=None  # Pour l'IA, on peut générer un nouveau numéro
         )
         
         # Générer PDF
@@ -2554,27 +1885,87 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
 @app.post("/generer-facture")
 async def generer_facture_endpoint(data: FactureRequest):
     try:
-        # Générer PDF
-        filepath_pdf, numero_facture, total_ht, total_ttc = generer_pdf_facture(data)
+        # IMPORTANT: Récupérer le numéro AVANT toute autre opération
+        # Si Pydantic n'a pas reçu le champ, il sera None
+        numero_facture_recu = None
         
-        # Générer Word
-        filepath_word, _, _, _ = generer_word_facture(data)
-        new_word_path = os.path.join(PDF_FOLDER, f"{numero_facture}.docx")
+        # Essayer de récupérer depuis data.numero_facture
+        if hasattr(data, 'numero_facture') and data.numero_facture:
+            numero_facture_recu = str(data.numero_facture).strip()
+            print(f"✅ Numéro de facture récupéré depuis data.numero_facture: '{numero_facture_recu}'")
+        else:
+            # Si le numéro n'est pas fourni, générer un numéro par défaut (pour rétrocompatibilité)
+            # mais logger un avertissement
+            numero_facture_recu = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+            print(f"⚠️ AVERTISSEMENT: data.numero_facture est None ou vide!")
+            print(f"   - data.numero_facture = '{data.numero_facture}'")
+            print(f"   - Type: {type(data.numero_facture)}")
+            print(f"   - hasattr(data, 'numero_facture'): {hasattr(data, 'numero_facture')}")
+            print(f"   - Génération d'un numéro par défaut: '{numero_facture_recu}'")
+            print(f"   - ⚠️ Ce numéro pourrait ne pas correspondre au numéro en base de données!")
+        
+        if not numero_facture_recu or not numero_facture_recu.strip():
+            # Dernière vérification de sécurité
+            numero_facture_recu = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+            print(f"⚠️ Numéro de facture vide après traitement, génération d'un numéro par défaut: '{numero_facture_recu}'")
+        
+        print(f"📄 Début génération facture pour client: {data.client.nom}")
+        print(f"📊 Nombre de prestations: {len(data.prestations)}")
+        print(f"🎨 Couleur PDF: {data.entreprise.couleur_pdf or 'défaut'}")
+        print(f"📋 Numéro de facture à utiliser: '{numero_facture_recu}'")
+        
+        # FORCER l'utilisation du numéro reçu en mettant à jour data.numero_facture
+        try:
+            if hasattr(data, 'model_copy'):
+                data = data.model_copy(update={'numero_facture': numero_facture_recu})
+            else:
+                data.numero_facture = numero_facture_recu
+            print(f"✅ data.numero_facture mis à jour avec: '{data.numero_facture}'")
+        except Exception as e:
+            print(f"⚠️ Impossible de mettre à jour data.numero_facture: {e}")
+            # Créer un nouveau dict avec le numéro forcé
+            data_dict = data.model_dump() if hasattr(data, 'model_dump') else data.dict()
+            data_dict['numero_facture'] = numero_facture_recu
+            data = FactureRequest(**data_dict)
+            print(f"✅ data recréé avec numero_facture: '{data.numero_facture}'")
+        
+        # Générer PDF avec le numéro forcé
+        filepath_pdf, numero_facture_pdf, total_ht, total_ttc = generer_pdf_facture(data, numero_facture_force=numero_facture_recu)
+        
+        # Vérifier que le numéro utilisé correspond bien au numéro reçu
+        if numero_facture_pdf != numero_facture_recu:
+            print(f"❌ ERREUR CRITIQUE: Le numéro utilisé ({numero_facture_pdf}) diffère du numéro reçu ({numero_facture_recu})")
+            # Utiliser le numéro reçu (celui du dashboard) - c'est la source de vérité
+            numero_facture_final = numero_facture_recu
+            # Renommer le fichier PDF pour correspondre au bon numéro
+            correct_pdf_path = os.path.join(PDF_FOLDER, f"{numero_facture_final}.pdf")
+            if os.path.exists(filepath_pdf) and filepath_pdf != correct_pdf_path:
+                print(f"🔄 Renommage du PDF de '{filepath_pdf}' vers '{correct_pdf_path}'")
+                os.rename(filepath_pdf, correct_pdf_path)
+                filepath_pdf = correct_pdf_path
+        else:
+            numero_facture_final = numero_facture_pdf
+            print(f"✅ Le numéro de facture est cohérent: {numero_facture_final}")
+        
+        # Générer Word avec le numéro forcé
+        filepath_word, _, _, _ = generer_word_facture(data, numero_facture_force=numero_facture_recu)
+        new_word_path = os.path.join(PDF_FOLDER, f"{numero_facture_final}.docx")
         if os.path.exists(filepath_word) and filepath_word != new_word_path:
+            print(f"🔄 Renommage du Word de '{filepath_word}' vers '{new_word_path}'")
             os.rename(filepath_word, new_word_path)
         
         # Upload sur Supabase Storage
-        pdf_url = upload_to_supabase(filepath_pdf, f"{numero_facture}.pdf")
-        word_url = upload_to_supabase(new_word_path, f"{numero_facture}.docx")
+        pdf_url = upload_to_supabase(filepath_pdf, f"{numero_facture_final}.pdf")
+        word_url = upload_to_supabase(new_word_path, f"{numero_facture_final}.docx")
         
         return {
             "success": True,
-            "numero_facture": numero_facture,
+            "numero_facture": numero_facture_final,
             "total_ht": total_ht,
             "total_ttc": total_ttc,
-            "pdf_filename": f"{numero_facture}.pdf",
+            "pdf_filename": f"{numero_facture_final}.pdf",
             "pdf_url": pdf_url,
-            "word_filename": f"{numero_facture}.docx",
+            "word_filename": f"{numero_facture_final}.docx",
             "word_url": word_url
         }
     except Exception as e:
