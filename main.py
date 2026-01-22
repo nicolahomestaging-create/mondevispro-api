@@ -935,12 +935,19 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         y_offset += 6*mm
     
     # Total TTC
+    # Pour facture d'acompte, s'assurer qu'on utilise bien le total_ttc fourni
+    if is_facture_acompte and total_ttc_fourni is not None:
+        total_ttc_final = float(total_ttc_fourni)
+        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni pour TOTAL TTC: {total_ttc_final:.2f}")
+    else:
+        total_ttc_final = total_ttc
+    
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
-    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc:.2f} €")
+    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_final:.2f} €")
     
-    return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc
+    return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc_final
 
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
