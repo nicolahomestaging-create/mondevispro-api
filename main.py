@@ -634,9 +634,10 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
     c.setFillColor(white)
     c.setFont("Helvetica-Bold", 9)
     c.drawString(18*mm, y_table + 3*mm, "Description")
-    c.drawString(105*mm, y_table + 3*mm, "Qté")
-    c.drawString(120*mm, y_table + 3*mm, "Unité")
-    c.drawString(142*mm, y_table + 3*mm, "P.U. HT")
+    c.drawString(95*mm, y_table + 3*mm, "Qté")
+    c.drawString(108*mm, y_table + 3*mm, "Unité")
+    c.drawString(125*mm, y_table + 3*mm, "P.U. HT")
+    c.drawString(150*mm, y_table + 3*mm, "TVA")
     c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
     
     y_ligne = y_table - 2*mm
@@ -714,9 +715,12 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
         # Colonnes standard
         c.setFont("Helvetica", 9)
         c.setFillColor(GRIS_FONCE)
-        c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
-        c.drawString(120*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
-        c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        c.drawString(97*mm, y_ligne + 2*mm, str(prestation.quantite))
+        c.drawString(108*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
+        c.drawString(125*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        # Afficher le taux TVA de la prestation
+        tva_prestation = getattr(prestation, 'tva_taux', None) or data.tva_taux
+        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_prestation}%")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
         
         y_ligne -= hauteur_ligne
@@ -784,9 +788,10 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     c.setFillColor(white)
     c.setFont("Helvetica-Bold", 9)
     c.drawString(18*mm, y_table + 3*mm, "Description")
-    c.drawString(105*mm, y_table + 3*mm, "Qté")
-    c.drawString(120*mm, y_table + 3*mm, "Unité")
-    c.drawString(142*mm, y_table + 3*mm, "P.U. HT")
+    c.drawString(95*mm, y_table + 3*mm, "Qté")
+    c.drawString(108*mm, y_table + 3*mm, "Unité")
+    c.drawString(125*mm, y_table + 3*mm, "P.U. HT")
+    c.drawString(150*mm, y_table + 3*mm, "TVA")
     c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
     
     y_ligne = y_table - 2*mm
@@ -867,9 +872,12 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         # Colonnes standard
         c.setFont("Helvetica", 9)
         c.setFillColor(GRIS_FONCE)
-        c.drawString(107*mm, y_ligne + 2*mm, str(prestation.quantite))
-        c.drawString(120*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
-        c.drawString(142*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        c.drawString(97*mm, y_ligne + 2*mm, str(prestation.quantite))
+        c.drawString(108*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
+        c.drawString(125*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
+        # Afficher le taux TVA de la prestation
+        tva_prestation = getattr(prestation, 'tva_taux', None) or tva_taux
+        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_prestation}%")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
     
     y_ligne -= 5*mm
