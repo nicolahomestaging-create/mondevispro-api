@@ -210,6 +210,7 @@ class Prestation(BaseModel):
     quantite: float
     unite: str
     prix_unitaire: float
+    tva_taux: Optional[float] = None  # Taux TVA par prestation
 
 class Entreprise(BaseModel):
     nom: str
@@ -592,26 +593,34 @@ def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_
         else:
             tva_par_taux[0] = 0
     
+    # Recalculer le total TTC à partir de la TVA par taux calculée
+    montant_tva_total_calcule = sum(tva_par_taux.values())
+    total_ttc_recalcule = total_ht_final + montant_tva_total_calcule
+    
     # Afficher TVA par taux
+    taux_affiches = False
     for taux in sorted(tva_par_taux.keys(), reverse=True):
         montant = tva_par_taux[taux]
         if taux > 0:
             c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
             c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
             y_offset += 6*mm
-        elif len(tva_par_taux) == 1:
-            c.setFont("Helvetica-Oblique", 8)
-            c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
-            c.setFont("Helvetica", 10)
-            y_offset += 6*mm
+            taux_affiches = True
     
-    # Total TTC avec encadré coloré
+    # Afficher "TVA non applicable" seulement si aucun taux > 0
+    if not taux_affiches:
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+        c.setFont("Helvetica", 10)
+        y_offset += 6*mm
+    
+    # Total TTC avec encadré coloré (utiliser le total_ttc recalculé)
     c.setFillColor(get_couleur_principale(data))
     c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
     c.setFillColor(white)
     c.setFont("Helvetica-Bold", 11)
     c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
-    c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc:.2f} €")
+    c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc_recalcule:.2f} €")
     
     return y_totaux - y_offset - 8*mm  # Retourner la position Y finale
 
