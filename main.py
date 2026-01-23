@@ -279,6 +279,7 @@ class FactureRequest(BaseModel):
     remise_type: Optional[str] = None  # "pourcentage" ou "montant"
     remise_valeur: Optional[float] = 0
     statut: Optional[str] = "en_attente"  # "en_attente", "payee", etc.
+    type_facture: Optional[str] = None  # "acompte", "complete", etc.
     total_ht: Optional[float] = None  # Total HT pour factures d'acompte
     total_ttc: Optional[float] = None  # Total TTC pour factures d'acompte
     is_facture_acompte: Optional[bool] = None  # Flag pour factures d'acompte (None par défaut pour détecter si la valeur est envoyée)
@@ -2031,18 +2032,38 @@ async def generer_facture_endpoint(data: FactureRequest):
         print(f"📋 Numéro de facture à utiliser: '{numero_facture_recu}'")
         
         # DEBUG: Vérifier les valeurs pour facture d'acompte
-        # Utiliser directement data.is_facture_acompte (Pydantic devrait le gérer)
-        # Si None, cela signifie que le champ n'a pas été envoyé, donc on considère que ce n'est PAS une facture d'acompte
-        is_facture_acompte = data.is_facture_acompte if data.is_facture_acompte is not None else False
+        # SOLUTION DE CONTOURNEMENT : Détecter les factures d'acompte même si is_facture_acompte n'est pas reçu
+        # Critères pour détecter une facture d'acompte :
+        # 1. is_facture_acompte est True (reçu du frontend)
+        # 2. OU type_facture == 'acompte' (reçu du frontend)
+        # 3. OU (total_ttc et total_ht sont fournis ET il n'y a qu'une seule prestation avec description contenant "Acompte")
+        is_facture_acompte = False
+        if data.is_facture_acompte is not None:
+            is_facture_acompte = bool(data.is_facture_acompte)
+        elif hasattr(data, 'type_facture') and data.type_facture == 'acompte':
+            is_facture_acompte = True
+            print(f"✅ Facture d'acompte détectée via type_facture: 'acompte'")
+        elif data.total_ttc is not None and data.total_ht is not None and len(data.prestations) == 1:
+            # Vérifier si la prestation contient "Acompte" dans la description
+            prestation = data.prestations[0]
+            if 'acompte' in prestation.description.lower():
+                is_facture_acompte = True
+                print(f"✅ Facture d'acompte détectée via description de prestation: '{prestation.description}'")
+        
         # Forcer en booléen pour être sûr
         is_facture_acompte = bool(is_facture_acompte)
+        
+        print(f"🔍 DÉTECTION FINALE - is_facture_acompte: {is_facture_acompte}")
         
         # DEBUG supplémentaire : vérifier model_dump pour voir toutes les valeurs
         try:
             data_dict = data.model_dump()
             print(f"🔍 DEBUG model_dump complet - is_facture_acompte: {data_dict.get('is_facture_acompte')}")
+            print(f"🔍 DEBUG model_dump complet - type_facture: {data_dict.get('type_facture')}")
             print(f"🔍 DEBUG model_dump complet - total_ttc: {data_dict.get('total_ttc')}")
             print(f"🔍 DEBUG model_dump complet - total_ht: {data_dict.get('total_ht')}")
+            if data.prestations:
+                print(f"🔍 DEBUG model_dump complet - première prestation description: {data.prestations[0].description if len(data.prestations) > 0 else 'N/A'}")
         except Exception as e:
             print(f"   ⚠️ Erreur model_dump: {e}")
         
