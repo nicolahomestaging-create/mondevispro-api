@@ -281,7 +281,7 @@ class FactureRequest(BaseModel):
     statut: Optional[str] = "en_attente"  # "en_attente", "payee", etc.
     total_ht: Optional[float] = None  # Total HT pour factures d'acompte
     total_ttc: Optional[float] = None  # Total TTC pour factures d'acompte
-    is_facture_acompte: Optional[bool] = False  # Flag pour factures d'acompte
+    is_facture_acompte: Optional[bool] = None  # Flag pour factures d'acompte (None par défaut pour détecter si la valeur est envoyée)
     taux_acompte: Optional[float] = None  # Taux d'acompte en pourcentage
 
 
@@ -2032,9 +2032,19 @@ async def generer_facture_endpoint(data: FactureRequest):
         
         # DEBUG: Vérifier les valeurs pour facture d'acompte
         # Utiliser directement data.is_facture_acompte (Pydantic devrait le gérer)
+        # Si None, cela signifie que le champ n'a pas été envoyé, donc on considère que ce n'est PAS une facture d'acompte
         is_facture_acompte = data.is_facture_acompte if data.is_facture_acompte is not None else False
         # Forcer en booléen pour être sûr
         is_facture_acompte = bool(is_facture_acompte)
+        
+        # DEBUG supplémentaire : vérifier model_dump pour voir toutes les valeurs
+        try:
+            data_dict = data.model_dump()
+            print(f"🔍 DEBUG model_dump complet - is_facture_acompte: {data_dict.get('is_facture_acompte')}")
+            print(f"🔍 DEBUG model_dump complet - total_ttc: {data_dict.get('total_ttc')}")
+            print(f"🔍 DEBUG model_dump complet - total_ht: {data_dict.get('total_ht')}")
+        except Exception as e:
+            print(f"   ⚠️ Erreur model_dump: {e}")
         
         total_ttc_recu = None
         total_ht_recu = None
