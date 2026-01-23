@@ -1956,20 +1956,47 @@ async def generer_facture_endpoint(data: FactureRequest):
             print(f"   prix_unitaire prestation: {data.prestations[0].prix_unitaire}")
             print(f"   quantite prestation: {data.prestations[0].quantite}")
         
-        # FORCER l'utilisation du numéro reçu en mettant à jour data.numero_facture
+        # ============================================================
+        # DÉTECTION AUTOMATIQUE DES FACTURES D'ACOMPTE
+        # ============================================================
+        # Si is_facture_acompte n'est pas explicitement True, on le détecte automatiquement
+        if not is_facture_acompte:
+            # Vérifier si le numéro de facture contient "ACO"
+            if numero_facture_recu and "ACO" in numero_facture_recu.upper():
+                is_facture_acompte = True
+                print(f"✅ DÉTECTION AUTO: Facture d'acompte détectée via numéro '{numero_facture_recu}'")
+            # Vérifier si la description contient "Acompte"
+            elif data.prestations and len(data.prestations) == 1:
+                desc = getattr(data.prestations[0], 'description', '')
+                if 'acompte' in desc.lower():
+                    is_facture_acompte = True
+                    print(f"✅ DÉTECTION AUTO: Facture d'acompte détectée via description '{desc}'")
+            # Vérifier si total_ttc est fourni et différent du calcul
+            if total_ttc_recu is not None and total_ht_recu is not None:
+                is_facture_acompte = True
+                print(f"✅ DÉTECTION AUTO: Facture d'acompte détectée via total_ttc/total_ht fournis")
+        
+        # FORCER les mises à jour sur l'objet data (numéro + is_facture_acompte)
+        updates = {'numero_facture': numero_facture_recu}
+        if is_facture_acompte:
+            updates['is_facture_acompte'] = True
+        
         try:
             if hasattr(data, 'model_copy'):
-                data = data.model_copy(update={'numero_facture': numero_facture_recu})
+                data = data.model_copy(update=updates)
             else:
                 data.numero_facture = numero_facture_recu
-            print(f"✅ data.numero_facture mis à jour avec: '{data.numero_facture}'")
+                if is_facture_acompte:
+                    data.is_facture_acompte = True
+            print(f"✅ data mis à jour - numero_facture: '{data.numero_facture}', is_facture_acompte: {data.is_facture_acompte}")
+            print(f"   total_ttc dans data: {data.total_ttc}, total_ht dans data: {data.total_ht}")
         except Exception as e:
-            print(f"⚠️ Impossible de mettre à jour data.numero_facture: {e}")
-            # Créer un nouveau dict avec le numéro forcé
+            print(f"⚠️ Impossible de mettre à jour data: {e}")
+            # Créer un nouveau dict avec les valeurs forcées
             data_dict = data.model_dump() if hasattr(data, 'model_dump') else data.dict()
-            data_dict['numero_facture'] = numero_facture_recu
+            data_dict.update(updates)
             data = FactureRequest(**data_dict)
-            print(f"✅ data recréé avec numero_facture: '{data.numero_facture}'")
+            print(f"✅ data recréé avec numero_facture: '{data.numero_facture}', is_facture_acompte: {data.is_facture_acompte}")
         
         # Générer PDF avec le numéro forcé
         filepath_pdf, numero_facture_pdf, total_ht, total_ttc = generer_pdf_facture(data, numero_facture_force=numero_facture_recu)
