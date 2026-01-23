@@ -731,22 +731,32 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     # Si c'est une facture d'acompte ET que total_ttc est fourni,
     # utiliser directement ces valeurs au lieu de recalculer
     
-    # Essayer plusieurs méthodes pour récupérer les valeurs (Pydantic peut stocker différemment)
+        # Essayer plusieurs méthodes pour récupérer les valeurs (Pydantic peut stocker différemment)
+    # DÉTECTION DE FACTURE D'ACOMPTE (même logique que dans generer_facture_endpoint)
     is_facture_acompte = False
     total_ttc_fourni = None
     total_ht_fourni = None
     
     # Méthode 1: Attribut direct
-    if hasattr(data, 'is_facture_acompte'):
-        is_facture_acompte = bool(data.is_facture_acompte) if data.is_facture_acompte is not None else False
+    if hasattr(data, 'is_facture_acompte') and data.is_facture_acompte is not None:
+        is_facture_acompte = bool(data.is_facture_acompte)
+    # Méthode 2: Détection via type_facture (si is_facture_acompte n'est pas défini)
+    elif hasattr(data, 'type_facture') and data.type_facture == 'acompte':
+        is_facture_acompte = True
+        print(f"✅ dessiner_tableau_prestations - Facture d'acompte détectée via type_facture: 'acompte'")
+    # Méthode 3: Détection via description de prestation (si total_ttc et total_ht sont fournis)
+    elif hasattr(data, 'total_ttc') and hasattr(data, 'total_ht') and data.total_ttc is not None and data.total_ht is not None:
+        if len(data.prestations) == 1 and 'acompte' in data.prestations[0].description.lower():
+            is_facture_acompte = True
+            print(f"✅ dessiner_tableau_prestations - Facture d'acompte détectée via description: '{data.prestations[0].description}'")
+    
+    # Récupérer total_ttc et total_ht
     if hasattr(data, 'total_ttc'):
         total_ttc_fourni = data.total_ttc
     if hasattr(data, 'total_ht'):
         total_ht_fourni = data.total_ht
     
     # Méthode 2: getattr (fallback)
-    if is_facture_acompte is False:
-        is_facture_acompte = getattr(data, 'is_facture_acompte', False)
     if total_ttc_fourni is None:
         total_ttc_fourni = getattr(data, 'total_ttc', None)
     if total_ht_fourni is None:
@@ -2111,6 +2121,14 @@ async def generer_facture_endpoint(data: FactureRequest):
                 print(f"   ✅ total_ht converti en float: {total_ht_float:.2f}")
             except (ValueError, TypeError) as e:
                 print(f"   ❌ ERREUR conversion total_ht: {e}")
+        
+        # IMPORTANT : Mettre à jour data.is_facture_acompte pour qu'il soit disponible dans generer_pdf_facture
+        # Pydantic permet de modifier les attributs même si ce n'est pas recommandé
+        try:
+            setattr(data, 'is_facture_acompte', is_facture_acompte)
+            print(f"✅ data.is_facture_acompte mis à jour avec: {is_facture_acompte}")
+        except Exception as e:
+            print(f"⚠️ Impossible de mettre à jour data.is_facture_acompte: {e}")
         
         # FORCER l'utilisation du numéro reçu en mettant à jour data.numero_facture
         try:
