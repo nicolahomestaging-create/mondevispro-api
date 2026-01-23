@@ -729,21 +729,79 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     # ============================================================
     # Si c'est une facture d'acompte ET que total_ttc est fourni,
     # utiliser directement ces valeurs au lieu de recalculer
-    is_facture_acompte = getattr(data, 'is_facture_acompte', False)
-    total_ttc_fourni = getattr(data, 'total_ttc', None)
-    total_ht_fourni = getattr(data, 'total_ht', None)
+    
+    # Essayer plusieurs méthodes pour récupérer les valeurs (Pydantic peut stocker différemment)
+    is_facture_acompte = False
+    total_ttc_fourni = None
+    total_ht_fourni = None
+    
+    # Méthode 1: Attribut direct
+    if hasattr(data, 'is_facture_acompte'):
+        is_facture_acompte = bool(data.is_facture_acompte) if data.is_facture_acompte is not None else False
+    if hasattr(data, 'total_ttc'):
+        total_ttc_fourni = data.total_ttc
+    if hasattr(data, 'total_ht'):
+        total_ht_fourni = data.total_ht
+    
+    # Méthode 2: getattr (fallback)
+    if is_facture_acompte is False:
+        is_facture_acompte = getattr(data, 'is_facture_acompte', False)
+    if total_ttc_fourni is None:
+        total_ttc_fourni = getattr(data, 'total_ttc', None)
+    if total_ht_fourni is None:
+        total_ht_fourni = getattr(data, 'total_ht', None)
+    
+    # Initialiser total_ttc pour qu'il soit toujours défini
+    total_ttc = 0.0
+    total_ht_final = 0.0
+    montant_tva = 0.0
+    
+    print(f"🔍 DEBUG dessiner_tableau_prestations - is_facture_acompte: {is_facture_acompte}, total_ttc_fourni: {total_ttc_fourni} (type: {type(total_ttc_fourni)}), total_ht_fourni: {total_ht_fourni} (type: {type(total_ht_fourni)})")
+    print(f"   data.total_ttc direct (hasattr): {hasattr(data, 'total_ttc')}, valeur: {data.total_ttc if hasattr(data, 'total_ttc') else 'N/A'}")
+    print(f"   data.total_ht direct (hasattr): {hasattr(data, 'total_ht')}, valeur: {data.total_ht if hasattr(data, 'total_ht') else 'N/A'}")
+    print(f"   data.is_facture_acompte direct (hasattr): {hasattr(data, 'is_facture_acompte')}, valeur: {data.is_facture_acompte if hasattr(data, 'is_facture_acompte') else 'N/A'}")
+    
+    # Essayer aussi model_dump si disponible (Pydantic v2)
+    if hasattr(data, 'model_dump'):
+        try:
+            data_dict = data.model_dump()
+            print(f"   model_dump - total_ttc: {data_dict.get('total_ttc', 'NON TROUVÉ')}")
+            print(f"   model_dump - total_ht: {data_dict.get('total_ht', 'NON TROUVÉ')}")
+            print(f"   model_dump - is_facture_acompte: {data_dict.get('is_facture_acompte', 'NON TROUVÉ')}")
+            # Utiliser les valeurs de model_dump si elles sont None
+            if total_ttc_fourni is None:
+                total_ttc_fourni = data_dict.get('total_ttc')
+            if total_ht_fourni is None:
+                total_ht_fourni = data_dict.get('total_ht')
+            if not is_facture_acompte:
+                is_facture_acompte = bool(data_dict.get('is_facture_acompte', False))
+        except Exception as e:
+            print(f"   ⚠️ Erreur model_dump: {e}")
     
     if is_facture_acompte and total_ttc_fourni is not None:
-        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni: {total_ttc_fourni}")
+        # Convertir en float si nécessaire (peut être string, int, ou float)
+        try:
+            if isinstance(total_ttc_fourni, str):
+                total_ttc = float(total_ttc_fourni.replace(',', '.'))
+            else:
+                total_ttc = float(total_ttc_fourni)
+        except (ValueError, TypeError) as e:
+            print(f"❌ ERREUR conversion total_ttc_fourni: {e}, valeur: {total_ttc_fourni}")
+            total_ttc = 0.0
+        
+        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni: {total_ttc_fourni} -> {total_ttc}")
         print(f"   total_ht fourni: {total_ht_fourni}")
         print(f"   tva_taux: {tva_taux}")
         
-        # Utiliser directement les valeurs fournies
-        total_ttc = float(total_ttc_fourni)
-        print(f"   total_ttc converti en float: {total_ttc}")
-        
         if total_ht_fourni is not None:
-            total_ht_final = float(total_ht_fourni)
+            try:
+                if isinstance(total_ht_fourni, str):
+                    total_ht_final = float(total_ht_fourni.replace(',', '.'))
+                else:
+                    total_ht_final = float(total_ht_fourni)
+            except (ValueError, TypeError) as e:
+                print(f"❌ ERREUR conversion total_ht_fourni: {e}, valeur: {total_ht_fourni}")
+                total_ht_final = total_ttc if tva_taux == 0 else total_ttc / (1 + tva_taux / 100)
             montant_tva = total_ttc - total_ht_final
             print(f"   Utilisation total_ht fourni: HT={total_ht_final}, TVA={montant_tva}, TTC={total_ttc}")
         elif tva_taux == 0:
@@ -767,6 +825,10 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         # Calcul normal : initialiser les variables
         total_ht_avant_acompte = 0
         total_acompte = 0
+        # Initialiser total_ttc pour éviter les erreurs (sera recalculé plus tard)
+        total_ttc = 0.0
+        total_ht_final = 0.0
+        montant_tva = 0.0
     
     # En-tête du tableau
     c.setFillColor(get_couleur_principale(data))
@@ -876,11 +938,14 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     if is_facture_acompte and total_ttc_fourni is not None:
         # Les valeurs ont déjà été calculées au début de la fonction
         # total_ttc, total_ht_final, montant_tva sont déjà définis
+        # IMPORTANT: Ne PAS recalculer total_ttc, utiliser celui fourni
         total_ht = total_ht_final
         remise = 0
         total_ht_apres_remise = total_ht_final
         # montant_tva a déjà été calculé au début de la fonction
+        # total_ttc a déjà été défini au début de la fonction (ligne ~742)
         print(f"✅ Utilisation des totaux fournis pour facture d'acompte - HT: {total_ht_final:.2f}, TVA: {montant_tva:.2f}, TTC: {total_ttc:.2f}")
+        print(f"   Vérification: total_ttc_fourni={total_ttc_fourni}, total_ttc={total_ttc}")
     else:
         # Calcul normal pour factures classiques
         # Calcul de la remise
@@ -942,16 +1007,46 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     
     # Total TTC
     # Pour facture d'acompte, s'assurer qu'on utilise bien le total_ttc fourni
+    print(f"🔍 AVANT calcul TOTAL TTC - is_facture_acompte: {is_facture_acompte}, total_ttc_fourni: {total_ttc_fourni}, total_ttc (calculé): {total_ttc}")
     if is_facture_acompte and total_ttc_fourni is not None:
-        total_ttc_final = float(total_ttc_fourni)
-        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni pour TOTAL TTC: {total_ttc_final:.2f}")
+        # Convertir en float si nécessaire (peut être string, int, ou float)
+        try:
+            if isinstance(total_ttc_fourni, str):
+                total_ttc_final = float(total_ttc_fourni.replace(',', '.'))
+            else:
+                total_ttc_final = float(total_ttc_fourni)
+        except (ValueError, TypeError) as e:
+            print(f"❌ ERREUR conversion total_ttc_fourni pour TOTAL TTC: {e}, valeur: {total_ttc_fourni}")
+            total_ttc_final = total_ttc
+        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni pour TOTAL TTC: {total_ttc_fourni} (type: {type(total_ttc_fourni)}) -> {total_ttc_final:.2f}")
+        print(f"   Comparaison: total_ttc_fourni={total_ttc_fourni}, total_ttc_final={total_ttc_final:.2f}, total_ttc (calculé)={total_ttc:.2f}")
     else:
         total_ttc_final = total_ttc
+        print(f"🔍 Utilisation total_ttc calculé: {total_ttc_final:.2f}")
     
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
+    
+    # DERNIÈRE VÉRIFICATION : S'assurer qu'on utilise bien total_ttc_fourni pour les factures d'acompte
+    if is_facture_acompte and total_ttc_fourni is not None:
+        # Forcer l'utilisation de total_ttc_fourni
+        try:
+            if isinstance(total_ttc_fourni, str):
+                total_ttc_final_force = float(total_ttc_fourni.replace(',', '.'))
+            else:
+                total_ttc_final_force = float(total_ttc_fourni)
+            print(f"🔒 FORCE total_ttc_final = {total_ttc_final_force:.2f} (depuis total_ttc_fourni={total_ttc_fourni})")
+            total_ttc_final = total_ttc_final_force
+        except (ValueError, TypeError) as e:
+            print(f"❌ ERREUR conversion finale total_ttc_fourni: {e}, valeur: {total_ttc_fourni}")
+            print(f"   Utilisation de total_ttc_final précédent: {total_ttc_final:.2f}")
+    
     c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_final:.2f} €")
+    
+    print(f"🔍 RETOUR dessiner_tableau_prestations - total_ht_final: {total_ht_final:.2f}, total_ttc_final: {total_ttc_final:.2f}")
+    print(f"   is_facture_acompte: {is_facture_acompte}, total_ttc_fourni: {total_ttc_fourni}")
+    print(f"   ✅ VALEUR FINALE AFFICHÉE DANS PDF: {total_ttc_final:.2f} €")
     
     return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc_final
 
@@ -1300,6 +1395,8 @@ def generer_pdf_facture(data: FactureRequest, numero_facture_force: Optional[str
     
     y_table = y_position - 50*mm
     y_totaux, total_ht, total_ttc = dessiner_tableau_prestations(c, width, data, y_table, data.tva_taux)
+    print(f"🔍 RETOUR generer_pdf_facture - total_ht: {total_ht:.2f}, total_ttc: {total_ttc:.2f}")
+    print(f"   is_facture_acompte: {getattr(data, 'is_facture_acompte', False)}, total_ttc fourni: {getattr(data, 'total_ttc', None)}")
     
     y_paiement = y_totaux - 45*mm
     c.setFillColor(GRIS_CLAIR)
@@ -1898,6 +1995,12 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
 @app.post("/generer-facture")
 async def generer_facture_endpoint(data: FactureRequest):
     try:
+        # DEBUG: Vérifier immédiatement is_facture_acompte AVANT toute autre opération
+        print(f"🔍 IMMÉDIAT - data.is_facture_acompte (direct): {data.is_facture_acompte if hasattr(data, 'is_facture_acompte') else 'ATTRIBUT NON TROUVÉ'}")
+        print(f"🔍 IMMÉDIAT - type(data.is_facture_acompte): {type(data.is_facture_acompte) if hasattr(data, 'is_facture_acompte') else 'N/A'}")
+        print(f"🔍 IMMÉDIAT - data.total_ttc (direct): {data.total_ttc if hasattr(data, 'total_ttc') else 'ATTRIBUT NON TROUVÉ'}")
+        print(f"🔍 IMMÉDIAT - data.total_ht (direct): {data.total_ht if hasattr(data, 'total_ht') else 'ATTRIBUT NON TROUVÉ'}")
+        
         # IMPORTANT: Récupérer le numéro AVANT toute autre opération
         # Si Pydantic n'a pas reçu le champ, il sera None
         numero_facture_recu = None
@@ -1928,16 +2031,55 @@ async def generer_facture_endpoint(data: FactureRequest):
         print(f"📋 Numéro de facture à utiliser: '{numero_facture_recu}'")
         
         # DEBUG: Vérifier les valeurs pour facture d'acompte
-        is_facture_acompte = getattr(data, 'is_facture_acompte', False)
-        total_ttc_recu = getattr(data, 'total_ttc', None)
-        total_ht_recu = getattr(data, 'total_ht', None)
-        print(f"🔍 DEBUG FACTURE ACOMPTE:")
-        print(f"   is_facture_acompte: {is_facture_acompte}")
-        print(f"   total_ttc reçu: {total_ttc_recu} (type: {type(total_ttc_recu)})")
-        print(f"   total_ht reçu: {total_ht_recu} (type: {type(total_ht_recu)})")
+        # Utiliser directement data.is_facture_acompte (Pydantic devrait le gérer)
+        is_facture_acompte = data.is_facture_acompte if data.is_facture_acompte is not None else False
+        # Forcer en booléen pour être sûr
+        is_facture_acompte = bool(is_facture_acompte)
+        
+        total_ttc_recu = None
+        total_ht_recu = None
+        if hasattr(data, 'total_ttc'):
+            total_ttc_recu = data.total_ttc
+        if hasattr(data, 'total_ht'):
+            total_ht_recu = data.total_ht
+        if total_ttc_recu is None:
+            total_ttc_recu = getattr(data, 'total_ttc', None)
+        if total_ht_recu is None:
+            total_ht_recu = getattr(data, 'total_ht', None)
+        # Essayer aussi model_dump si disponible
+        if hasattr(data, 'model_dump'):
+            try:
+                data_dict = data.model_dump()
+                if total_ttc_recu is None:
+                    total_ttc_recu = data_dict.get('total_ttc')
+                if total_ht_recu is None:
+                    total_ht_recu = data_dict.get('total_ht')
+            except Exception as e:
+                print(f"   ⚠️ Erreur model_dump pour total_ttc/total_ht: {e}")
+        
+        print(f"🔍 DEBUG FACTURE ACOMPTE (generer_facture_endpoint):")
+        print(f"   is_facture_acompte: {is_facture_acompte} (type: {type(is_facture_acompte)})")
+        print(f"   hasattr(data, 'is_facture_acompte'): {hasattr(data, 'is_facture_acompte')}")
+        if hasattr(data, 'is_facture_acompte'):
+            print(f"   data.is_facture_acompte direct: {data.is_facture_acompte} (type: {type(data.is_facture_acompte)})")
+        print(f"   total_ttc reçu: {total_ttc_recu} (type: {type(total_ttc_recu)}, valeur brute: {repr(total_ttc_recu)})")
+        print(f"   total_ht reçu: {total_ht_recu} (type: {type(total_ht_recu)}, valeur brute: {repr(total_ht_recu)})")
         if data.prestations and len(data.prestations) > 0:
-            print(f"   prix_unitaire prestation: {data.prestations[0].prix_unitaire}")
+            print(f"   prix_unitaire prestation: {data.prestations[0].prix_unitaire} (type: {type(data.prestations[0].prix_unitaire)})")
             print(f"   quantite prestation: {data.prestations[0].quantite}")
+        # Vérifier si les valeurs sont bien des nombres
+        if total_ttc_recu is not None:
+            try:
+                total_ttc_float = float(total_ttc_recu)
+                print(f"   ✅ total_ttc converti en float: {total_ttc_float:.2f}")
+            except (ValueError, TypeError) as e:
+                print(f"   ❌ ERREUR conversion total_ttc: {e}")
+        if total_ht_recu is not None:
+            try:
+                total_ht_float = float(total_ht_recu)
+                print(f"   ✅ total_ht converti en float: {total_ht_float:.2f}")
+            except (ValueError, TypeError) as e:
+                print(f"   ❌ ERREUR conversion total_ht: {e}")
         
         # FORCER l'utilisation du numéro reçu en mettant à jour data.numero_facture
         try:
