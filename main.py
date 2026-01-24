@@ -212,6 +212,14 @@ class Prestation(BaseModel):
     prix_unitaire: float
     tva_taux: Optional[float] = None  # Taux TVA par prestation
 
+class LigneFinale(BaseModel):
+    """Ligne finale du devis figé avec montant HT après remise"""
+    description: str
+    quantite: float = 1
+    unite: str = "u"
+    ht_apres_remise: float  # Montant HT après remise pour cette ligne
+    tva_taux: float = 20.0  # Taux TVA pour cette ligne
+
 class Entreprise(BaseModel):
     nom: str
     gerant: Optional[str] = ""
@@ -286,6 +294,7 @@ class FactureRequest(BaseModel):
     taux_acompte: Optional[float] = None  # Taux d'acompte en pourcentage
     acompte_ttc_deja_facture: Optional[float] = None  # Montant TTC des acomptes déjà versés
     acompte_references: Optional[List[str]] = None  # Numéros des factures d'acompte
+    lignes_finales_devis: Optional[List[LigneFinale]] = None  # Lignes finales du devis figé (priorité sur prestations)
 
 
 # ==================== FONCTIONS UTILITAIRES ====================
@@ -737,25 +746,203 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
     return y_ligne - 10*mm, total_ht_avant_acompte, total_acompte
 
 
+def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, lignes_finales, acompte_ttc, acompte_refs):
+    """
+    Dessine une facture finale à partir des lignes finales du devis figé.
+    Les lignes finales contiennent déjà les montants HT après remise et les TVA par ligne.
+    """
+    print(f"🔒 FACTURE DEPUIS LIGNES FINALES - {len(lignes_finales)} lignes")
+    
+    # En-tête du tableau
+    c.setFillColor(get_couleur_principale(data))
+    c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
+    
+    c.setFillColor(white)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(18*mm, y_table + 3*mm, "Description")
+    c.drawString(95*mm, y_table + 3*mm, "Qté")
+    c.drawString(108*mm, y_table + 3*mm, "Unité")
+    c.drawString(125*mm, y_table + 3*mm, "P.U. HT")
+    c.drawString(150*mm, y_table + 3*mm, "TVA")
+    c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
+    
+    y_ligne = y_table - 2*mm
+    
+    # Calculer les totaux par taux de TVA
+    total_ht_global = 0
+    ht_par_taux = {}  # {taux: montant_ht}
+    
+    for i, ligne in enumerate(lignes_finales):
+        ht_apres_remise = float(getattr(ligne, 'ht_apres_remise', 0) or 0)
+        tva_ligne = float(getattr(ligne, 'tva_taux', tva_taux) or tva_taux)
+        quantite = float(getattr(ligne, 'quantite', 1) or 1)
+        unite = getattr(ligne, 'unite', 'u') or 'u'
+        description = getattr(ligne, 'description', '') or ''
+        
+        # Le prix unitaire = HT après remise / quantité
+        prix_unitaire = ht_apres_remise / quantite if quantite > 0 else ht_apres_remise
+        
+        total_ht_global += ht_apres_remise
+        
+        if tva_ligne not in ht_par_taux:
+            ht_par_taux[tva_ligne] = 0
+        ht_par_taux[tva_ligne] += ht_apres_remise
+        
+        print(f"   Ligne {i+1}: {description} | HT={ht_apres_remise:.2f}€ | TVA={tva_ligne}%")
+        
+        # Dessiner la ligne
+        y_ligne -= 10*mm
+        
+        # Alterner les couleurs de fond
+        if i % 2 == 0:
+            c.setFillColor(HexColor('#f8f9fa'))
+            c.rect(15*mm, y_ligne, width - 30*mm, 10*mm, fill=True, stroke=False)
+        
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 9)
+        
+        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(description, 50))
+        c.drawString(97*mm, y_ligne + 2*mm, str(quantite))
+        c.drawString(108*mm, y_ligne + 2*mm, unite)
+        c.drawString(125*mm, y_ligne + 2*mm, f"{prix_unitaire:.2f} €")
+        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_ligne}%")
+        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{ht_apres_remise:.2f} €")
+    
+    y_ligne -= 5*mm
+    
+    # Ligne de séparation
+    c.setStrokeColor(GRIS_CLAIR)
+    c.setLineWidth(1)
+    c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+    
+    # ============================================================
+    # CALCUL DES TOTAUX AVEC TVA PAR TAUX
+    # ============================================================
+    
+    # Calcul TVA par taux
+    tva_par_taux = {}
+    for taux, montant_ht in ht_par_taux.items():
+        if taux > 0:
+            tva_par_taux[taux] = montant_ht * (taux / 100)
+    
+    montant_tva_total = sum(tva_par_taux.values())
+    total_ttc_avant_acompte = total_ht_global + montant_tva_total
+    
+    # Acompte TTC déjà versé
+    total_acompte_ttc = float(acompte_ttc) if acompte_ttc else 0
+    acompte_ref_texte = f" ({', '.join(acompte_refs)})" if acompte_refs else ""
+    
+    # Reste à payer
+    reste_a_payer = total_ttc_avant_acompte - total_acompte_ttc
+    
+    print(f"📊 CALCULS FACTURE FINALE (depuis lignes_finales):")
+    print(f"   Total HT (après remise): {total_ht_global:.2f} €")
+    print(f"   TVA par taux: {tva_par_taux}")
+    print(f"   Total TTC avant acompte: {total_ttc_avant_acompte:.2f} €")
+    print(f"   Acompte TTC déjà versé: {total_acompte_ttc:.2f} €")
+    print(f"   Reste à payer: {reste_a_payer:.2f} €")
+    
+    # ============================================================
+    # AFFICHAGE DES TOTAUX
+    # ============================================================
+    y_totaux = y_ligne - 10*mm
+    x_label = 130*mm
+    x_value = width - 18*mm
+    
+    c.setFillColor(GRIS_FONCE)
+    c.setFont("Helvetica", 10)
+    
+    y_offset = 0
+    
+    # Total HT (déjà après remise car lignes_finales contiennent les HT après remise)
+    c.drawString(x_label, y_totaux - y_offset, "Total HT")
+    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_global:.2f} €")
+    y_offset += 6*mm
+    
+    # TVA par taux
+    tva_affichee = False
+    for taux in sorted(tva_par_taux.keys(), reverse=True):
+        montant = tva_par_taux[taux]
+        if taux > 0 and montant > 0:
+            c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
+            c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
+            y_offset += 6*mm
+            tva_affichee = True
+    
+    # Si aucune TVA affichée (auto-entrepreneur)
+    if not tva_affichee:
+        c.setFont("Helvetica-Oblique", 9)
+        c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+        c.setFont("Helvetica", 10)
+        y_offset += 6*mm
+    
+    # Total TTC avant acompte (si acompte présent)
+    if total_acompte_ttc > 0:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(x_label, y_totaux - y_offset, "Total TTC")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_avant_acompte:.2f} €")
+        y_offset += 8*mm
+        
+        # Acompte déjà versé
+        c.setFont("Helvetica", 10)
+        c.drawString(x_label, y_totaux - y_offset, f"Acompte versé{acompte_ref_texte}")
+        c.setFillColor(HexColor('#27ae60'))  # Vert
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte_ttc:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 8*mm
+        
+        # Encadré RESTE À PAYER
+        c.setFillColor(get_couleur_principale(data))
+        c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{reste_a_payer:.2f} €")
+        
+        return y_totaux - y_offset - 13*mm, total_ht_global, reste_a_payer
+    else:
+        # Pas d'acompte - Total TTC simple
+        c.setFillColor(get_couleur_principale(data))
+        c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
+        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc_avant_acompte:.2f} €")
+        
+        return y_totaux - y_offset - 13*mm, total_ht_global, total_ttc_avant_acompte
+
+
 def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     """Dessine le tableau des prestations pour une facture avec totaux propres"""
     
     # ============================================================
-    # DÉTECTION DU TYPE DE FACTURE
+    # DÉTECTION DU TYPE DE FACTURE ET DES DONNÉES DISPONIBLES
     # ============================================================
     is_facture_acompte = getattr(data, 'is_facture_acompte', False)
     total_ttc_fourni = getattr(data, 'total_ttc', None)
     total_ht_fourni = getattr(data, 'total_ht', None)
     acompte_ttc_deja_facture = getattr(data, 'acompte_ttc_deja_facture', None)
     acompte_references = getattr(data, 'acompte_references', []) or []
+    lignes_finales_devis = getattr(data, 'lignes_finales_devis', None)
     
     print(f"📄 FACTURE - is_facture_acompte: {is_facture_acompte}")
     print(f"   total_ttc_fourni: {total_ttc_fourni}, total_ht_fourni: {total_ht_fourni}")
     print(f"   acompte_ttc_deja_facture: {acompte_ttc_deja_facture}")
     print(f"   acompte_references: {acompte_references}")
+    print(f"   lignes_finales_devis: {'OUI' if lignes_finales_devis and len(lignes_finales_devis) > 0 else 'NON'}")
     
     # ============================================================
-    # SÉPARER PRESTATIONS POSITIVES ET LIGNES D'ACOMPTE
+    # PRIORITÉ : UTILISER lignes_finales_devis SI DISPONIBLE
+    # ============================================================
+    # Ces lignes contiennent les montants HT après remise et les TVA par ligne
+    # C'est la source de vérité pour les factures finales
+    
+    if lignes_finales_devis and len(lignes_finales_devis) > 0:
+        print(f"✅ UTILISATION DE lignes_finales_devis ({len(lignes_finales_devis)} lignes)")
+        return dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, lignes_finales_devis, acompte_ttc_deja_facture, acompte_references)
+    
+    # ============================================================
+    # FALLBACK : SÉPARER PRESTATIONS POSITIVES ET LIGNES D'ACOMPTE
     # ============================================================
     prestations_positives = []
     lignes_acompte = []
