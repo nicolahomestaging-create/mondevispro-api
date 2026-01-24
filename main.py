@@ -211,6 +211,8 @@ class Prestation(BaseModel):
     unite: str
     prix_unitaire: float
     tva_taux: Optional[float] = None  # Taux TVA par prestation
+    description_detaillee: Optional[str] = None  # Description longue (sous la description principale)
+    notes: Optional[str] = None  # Notes en italique
 
 class LigneFinale(BaseModel):
     """Ligne finale du devis figé avec montant HT après remise"""
@@ -219,6 +221,8 @@ class LigneFinale(BaseModel):
     unite: str = "u"
     ht_apres_remise: float  # Montant HT après remise pour cette ligne
     tva_taux: float = 20.0  # Taux TVA pour cette ligne
+    description_detaillee: Optional[str] = None  # Description longue
+    notes: Optional[str] = None  # Notes en italique
 
 class Entreprise(BaseModel):
     nom: str
@@ -367,6 +371,34 @@ def tronquer_texte(texte: str, max_chars: int) -> str:
     if len(texte) <= max_chars:
         return texte
     return texte[:max_chars-3] + "..."
+
+def decouper_texte_en_lignes(texte: str, max_chars: int = 45) -> list:
+    """Découpe un texte long en plusieurs lignes sans couper les mots"""
+    if not texte:
+        return []
+    
+    lignes = []
+    mots = texte.split()
+    ligne_courante = ""
+    
+    for mot in mots:
+        test_ligne = (ligne_courante + " " + mot).strip() if ligne_courante else mot
+        if len(test_ligne) <= max_chars:
+            ligne_courante = test_ligne
+        else:
+            if ligne_courante:
+                lignes.append(ligne_courante)
+            # Si le mot seul est trop long, on le tronque
+            if len(mot) > max_chars:
+                lignes.append(mot[:max_chars-3] + "...")
+                ligne_courante = ""
+            else:
+                ligne_courante = mot
+    
+    if ligne_courante:
+        lignes.append(ligne_courante)
+    
+    return lignes
 
 def formater_adresse_complete(adresse: str, cp_ville: str) -> str:
     parties = []
@@ -655,9 +687,12 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
     total_ht_avant_acompte = 0
     total_acompte = 0
     
+    # Largeur max pour les descriptions (ne pas dépasser colonne Qté à 95mm)
+    MAX_DESC_CHARS = 42  # ~75mm de large avec police 9
+    MAX_DETAIL_CHARS = 40  # Pour les sous-lignes en police 7
+    
     # Dessiner les lignes
     for i, prestation in enumerate(prestations):
-        y_ligne -= 10*mm
         total_ligne = prestation.quantite * prestation.prix_unitaire
         
         # Séparer les prestations positives et les acomptes (négatifs)
@@ -666,75 +701,73 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
         else:
             total_acompte += abs(total_ligne)
         
-        # Alterner les couleurs de fond
-        hauteur_ligne = 10*mm
-        
-        # Gérer descriptions enrichies
-        description_principale = prestation.description if hasattr(prestation, 'description') else ''
+        # Récupérer les textes
+        description_principale = getattr(prestation, 'description', '') or ''
         description_detaillee = getattr(prestation, 'description_detaillee', '') or ''
         notes = getattr(prestation, 'notes', '') or ''
         
-        if description_detaillee or notes:
-            lignes_detail = []
-            if description_detaillee:
-                mots_detail = description_detaillee.split()
-                ligne_courante = ""
-                for mot in mots_detail:
-                    if len(ligne_courante + " " + mot) <= 45:
-                        ligne_courante = (ligne_courante + " " + mot).strip()
-                    else:
-                        if ligne_courante:
-                            lignes_detail.append(ligne_courante)
-                        ligne_courante = mot
-                if ligne_courante:
-                    lignes_detail.append(ligne_courante)
-            
-            nb_lignes_detail = len(lignes_detail)
-            if notes:
-                nb_lignes_detail += 1
-            
-            if nb_lignes_detail > 0:
-                hauteur_ligne = (10 + (nb_lignes_detail * 4)) * mm
+        # Découper les textes en lignes
+        lignes_desc_principale = decouper_texte_en_lignes(description_principale, MAX_DESC_CHARS)
+        lignes_desc_detaillee = decouper_texte_en_lignes(description_detaillee, MAX_DETAIL_CHARS)
+        lignes_notes = decouper_texte_en_lignes(notes, MAX_DETAIL_CHARS - 6)  # -6 pour "Note: "
         
-        if (index_debut + i) % 2 == 0:
-            c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne - hauteur_ligne + 10*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
+        # Calculer la hauteur de ligne nécessaire
+        nb_lignes_total = max(1, len(lignes_desc_principale))
+        nb_lignes_total += len(lignes_desc_detaillee)
+        nb_lignes_total += len(lignes_notes)
         
-        c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica", 9)
-        
-        # Description principale
-        y_text = y_ligne + 2*mm
-        c.drawString(18*mm, y_text, tronquer_texte(description_principale, 50))
-        
-        # Description détaillée et notes
-        y_detail = y_ligne - 3*mm
-        if description_detaillee:
-            c.setFont("Helvetica", 7)
-            c.setFillColor(HexColor('#666666'))
-            for ligne_detail in lignes_detail[:3]:
-                c.drawString(18*mm, y_detail, tronquer_texte(ligne_detail, 60))
-                y_detail -= 3.5*mm
-        
-        if notes:
-            c.setFont("Helvetica-Oblique", 7)
-            c.setFillColor(HexColor('#888888'))
-            notes_texte = f"Note: {tronquer_texte(notes, 55)}"
-            c.drawString(18*mm, y_detail, notes_texte)
-            y_detail -= 3.5*mm
-        
-        # Colonnes standard
-        c.setFont("Helvetica", 9)
-        c.setFillColor(GRIS_FONCE)
-        c.drawString(97*mm, y_ligne + 2*mm, str(prestation.quantite))
-        c.drawString(108*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
-        c.drawString(125*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
-        # Afficher le taux TVA de la prestation
-        tva_prestation = getattr(prestation, 'tva_taux', None) or data.tva_taux
-        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_prestation}%")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+        # Hauteur de base + lignes supplémentaires
+        if nb_lignes_total <= 1:
+            hauteur_ligne = 10*mm
+        else:
+            hauteur_ligne = 8*mm + (nb_lignes_total * 3.5*mm)
         
         y_ligne -= hauteur_ligne
+        
+        # Fond alterné
+        if (index_debut + i) % 2 == 0:
+            c.setFillColor(HexColor('#f8f9fa'))
+            c.rect(15*mm, y_ligne, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
+        
+        # Position Y pour le texte (en haut de la cellule)
+        y_text = y_ligne + hauteur_ligne - 5*mm
+        
+        # Description principale (peut être sur plusieurs lignes)
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica-Bold", 9)
+        for j, ligne_desc in enumerate(lignes_desc_principale[:3]):  # Max 3 lignes
+            c.drawString(18*mm, y_text, ligne_desc)
+            y_text -= 3.5*mm
+            if j == 0:
+                c.setFont("Helvetica", 9)  # Normal après la première ligne
+        
+        # Description détaillée (en gris, plus petit)
+        if lignes_desc_detaillee:
+            c.setFont("Helvetica", 7)
+            c.setFillColor(HexColor('#555555'))
+            for ligne_detail in lignes_desc_detaillee[:4]:  # Max 4 lignes
+                c.drawString(18*mm, y_text, ligne_detail)
+                y_text -= 3*mm
+        
+        # Notes (en italique gris)
+        if lignes_notes:
+            c.setFont("Helvetica-Oblique", 7)
+            c.setFillColor(HexColor('#777777'))
+            for k, ligne_note in enumerate(lignes_notes[:2]):  # Max 2 lignes
+                prefix = "Note: " if k == 0 else "      "
+                c.drawString(18*mm, y_text, prefix + ligne_note)
+                y_text -= 3*mm
+        
+        # Colonnes standard (alignées en haut de la cellule)
+        y_colonnes = y_ligne + hauteur_ligne - 5*mm
+        c.setFont("Helvetica", 9)
+        c.setFillColor(GRIS_FONCE)
+        c.drawString(97*mm, y_colonnes, str(prestation.quantite))
+        c.drawString(108*mm, y_colonnes, getattr(prestation, 'unite', 'u') or 'u')
+        c.drawString(125*mm, y_colonnes, f"{prestation.prix_unitaire:.2f} €")
+        tva_prestation = getattr(prestation, 'tva_taux', None) or data.tva_taux
+        c.drawString(150*mm, y_colonnes, f"{tva_prestation}%")
+        c.drawRightString(width - 18*mm, y_colonnes, f"{total_ligne:.2f} €")
     
     y_ligne -= 5*mm
     
@@ -768,6 +801,10 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
     
     y_ligne = y_table - 2*mm
     
+    # Largeur max pour les descriptions
+    MAX_DESC_CHARS = 42
+    MAX_DETAIL_CHARS = 40
+    
     # Calculer les totaux par taux de TVA
     total_ht_global = 0
     ht_par_taux = {}  # {taux: montant_ht}
@@ -778,6 +815,8 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
         quantite = float(getattr(ligne, 'quantite', 1) or 1)
         unite = getattr(ligne, 'unite', 'u') or 'u'
         description = getattr(ligne, 'description', '') or ''
+        description_detaillee = getattr(ligne, 'description_detaillee', '') or ''
+        notes = getattr(ligne, 'notes', '') or ''
         
         # Le prix unitaire = HT après remise / quantité
         prix_unitaire = ht_apres_remise / quantite if quantite > 0 else ht_apres_remise
@@ -790,23 +829,66 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
         
         print(f"   Ligne {i+1}: {description} | HT={ht_apres_remise:.2f}€ | TVA={tva_ligne}%")
         
-        # Dessiner la ligne
-        y_ligne -= 10*mm
+        # Découper les textes en lignes
+        lignes_desc_principale = decouper_texte_en_lignes(description, MAX_DESC_CHARS)
+        lignes_desc_detaillee = decouper_texte_en_lignes(description_detaillee, MAX_DETAIL_CHARS)
+        lignes_notes = decouper_texte_en_lignes(notes, MAX_DETAIL_CHARS - 6)
         
-        # Alterner les couleurs de fond
+        # Calculer la hauteur de ligne
+        nb_lignes_total = max(1, len(lignes_desc_principale))
+        nb_lignes_total += len(lignes_desc_detaillee)
+        nb_lignes_total += len(lignes_notes)
+        
+        if nb_lignes_total <= 1:
+            hauteur_ligne = 10*mm
+        else:
+            hauteur_ligne = 8*mm + (nb_lignes_total * 3.5*mm)
+        
+        y_ligne -= hauteur_ligne
+        
+        # Fond alterné
         if i % 2 == 0:
             c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne, width - 30*mm, 10*mm, fill=True, stroke=False)
+            c.rect(15*mm, y_ligne, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
         
+        # Position Y pour le texte
+        y_text = y_ligne + hauteur_ligne - 5*mm
+        
+        # Description principale
         c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica", 9)
+        c.setFont("Helvetica-Bold", 9)
+        for j, ligne_desc in enumerate(lignes_desc_principale[:3]):
+            c.drawString(18*mm, y_text, ligne_desc)
+            y_text -= 3.5*mm
+            if j == 0:
+                c.setFont("Helvetica", 9)
         
-        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(description, 50))
-        c.drawString(97*mm, y_ligne + 2*mm, str(quantite))
-        c.drawString(108*mm, y_ligne + 2*mm, unite)
-        c.drawString(125*mm, y_ligne + 2*mm, f"{prix_unitaire:.2f} €")
-        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_ligne}%")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{ht_apres_remise:.2f} €")
+        # Description détaillée
+        if lignes_desc_detaillee:
+            c.setFont("Helvetica", 7)
+            c.setFillColor(HexColor('#555555'))
+            for ligne_detail in lignes_desc_detaillee[:4]:
+                c.drawString(18*mm, y_text, ligne_detail)
+                y_text -= 3*mm
+        
+        # Notes
+        if lignes_notes:
+            c.setFont("Helvetica-Oblique", 7)
+            c.setFillColor(HexColor('#777777'))
+            for k, ligne_note in enumerate(lignes_notes[:2]):
+                prefix = "Note: " if k == 0 else "      "
+                c.drawString(18*mm, y_text, prefix + ligne_note)
+                y_text -= 3*mm
+        
+        # Colonnes standard (alignées en haut)
+        y_colonnes = y_ligne + hauteur_ligne - 5*mm
+        c.setFont("Helvetica", 9)
+        c.setFillColor(GRIS_FONCE)
+        c.drawString(97*mm, y_colonnes, str(quantite))
+        c.drawString(108*mm, y_colonnes, unite)
+        c.drawString(125*mm, y_colonnes, f"{prix_unitaire:.2f} €")
+        c.drawString(150*mm, y_colonnes, f"{tva_ligne}%")
+        c.drawRightString(width - 18*mm, y_colonnes, f"{ht_apres_remise:.2f} €")
     
     y_ligne -= 5*mm
     
@@ -1068,6 +1150,10 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     
     y_ligne = y_table - 2*mm
     
+    # Largeur max pour les descriptions
+    MAX_DESC_CHARS = 42
+    MAX_DETAIL_CHARS = 40
+    
     # Calcul des totaux HT et TVA par taux (seulement prestations positives)
     total_ht_avant_remise = 0
     ht_par_taux = {}  # {taux: montant_ht}
@@ -1084,67 +1170,71 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
             ht_par_taux[tva_prestation] = 0
         ht_par_taux[tva_prestation] += total_ligne
         
-        # Calculer hauteur de ligne
-        hauteur_ligne = 10*mm
-        description_principale = prestation.description if hasattr(prestation, 'description') else ''
+        # Récupérer les textes
+        description_principale = getattr(prestation, 'description', '') or ''
         description_detaillee = getattr(prestation, 'description_detaillee', '') or ''
         notes = getattr(prestation, 'notes', '') or ''
         
-        lignes_detail = []
-        if description_detaillee:
-            mots_detail = description_detaillee.split()
-            ligne_courante = ""
-            for mot in mots_detail:
-                if len(ligne_courante + " " + mot) <= 45:
-                    ligne_courante = (ligne_courante + " " + mot).strip()
-                else:
-                    if ligne_courante:
-                        lignes_detail.append(ligne_courante)
-                    ligne_courante = mot
-            if ligne_courante:
-                lignes_detail.append(ligne_courante)
-            
-            nb_lignes_detail = len(lignes_detail)
-            if notes:
-                nb_lignes_detail += 1
-            if nb_lignes_detail > 0:
-                hauteur_ligne = (10 + (nb_lignes_detail * 4)) * mm
+        # Découper les textes en lignes
+        lignes_desc_principale = decouper_texte_en_lignes(description_principale, MAX_DESC_CHARS)
+        lignes_desc_detaillee = decouper_texte_en_lignes(description_detaillee, MAX_DETAIL_CHARS)
+        lignes_notes = decouper_texte_en_lignes(notes, MAX_DETAIL_CHARS - 6)
+        
+        # Calculer la hauteur de ligne
+        nb_lignes_total = max(1, len(lignes_desc_principale))
+        nb_lignes_total += len(lignes_desc_detaillee)
+        nb_lignes_total += len(lignes_notes)
+        
+        if nb_lignes_total <= 1:
+            hauteur_ligne = 10*mm
+        else:
+            hauteur_ligne = 8*mm + (nb_lignes_total * 3.5*mm)
         
         y_ligne -= hauteur_ligne
         
-        # Alterner les couleurs de fond
+        # Fond alterné
         if i % 2 == 0:
             c.setFillColor(HexColor('#f8f9fa'))
-            c.rect(15*mm, y_ligne - hauteur_ligne + 10*mm, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
+            c.rect(15*mm, y_ligne, width - 30*mm, hauteur_ligne, fill=True, stroke=False)
         
-        c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica", 9)
+        # Position Y pour le texte
+        y_text = y_ligne + hauteur_ligne - 5*mm
         
         # Description principale
-        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(description_principale, 50))
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica-Bold", 9)
+        for j, ligne_desc in enumerate(lignes_desc_principale[:3]):
+            c.drawString(18*mm, y_text, ligne_desc)
+            y_text -= 3.5*mm
+            if j == 0:
+                c.setFont("Helvetica", 9)
         
-        # Description détaillée et notes
-        y_detail = y_ligne - 3*mm
-        if description_detaillee:
+        # Description détaillée
+        if lignes_desc_detaillee:
             c.setFont("Helvetica", 7)
-            c.setFillColor(HexColor('#666666'))
-            for ligne_detail in lignes_detail[:3]:
-                c.drawString(18*mm, y_detail, tronquer_texte(ligne_detail, 60))
-                y_detail -= 3.5*mm
+            c.setFillColor(HexColor('#555555'))
+            for ligne_detail in lignes_desc_detaillee[:4]:
+                c.drawString(18*mm, y_text, ligne_detail)
+                y_text -= 3*mm
         
-        if notes:
+        # Notes
+        if lignes_notes:
             c.setFont("Helvetica-Oblique", 7)
-            c.setFillColor(HexColor('#888888'))
-            c.drawString(18*mm, y_detail, f"Note: {tronquer_texte(notes, 55)}")
+            c.setFillColor(HexColor('#777777'))
+            for k, ligne_note in enumerate(lignes_notes[:2]):
+                prefix = "Note: " if k == 0 else "      "
+                c.drawString(18*mm, y_text, prefix + ligne_note)
+                y_text -= 3*mm
         
-        # Colonnes standard
+        # Colonnes standard (alignées en haut)
+        y_colonnes = y_ligne + hauteur_ligne - 5*mm
         c.setFont("Helvetica", 9)
         c.setFillColor(GRIS_FONCE)
-        c.drawString(97*mm, y_ligne + 2*mm, str(prestation.quantite))
-        c.drawString(108*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
-        c.drawString(125*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
-        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_prestation}%")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
+        c.drawString(97*mm, y_colonnes, str(prestation.quantite))
+        c.drawString(108*mm, y_colonnes, getattr(prestation, 'unite', 'u') or 'u')
+        c.drawString(125*mm, y_colonnes, f"{prestation.prix_unitaire:.2f} €")
+        c.drawString(150*mm, y_colonnes, f"{tva_prestation}%")
+        c.drawRightString(width - 18*mm, y_colonnes, f"{total_ligne:.2f} €")
     
     y_ligne -= 5*mm
     
