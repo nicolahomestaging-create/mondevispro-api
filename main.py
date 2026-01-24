@@ -883,13 +883,26 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_avant_acompte:.2f} €")
         y_offset += 8*mm
         
-        # Acompte déjà versé
+        # Acompte déjà versé - Ligne 1 : libellé + montant
         c.setFont("Helvetica", 10)
-        c.drawString(x_label, y_totaux - y_offset, f"Acompte versé{acompte_ref_texte}")
-        c.setFillColor(HexColor('#27ae60'))  # Vert
-        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte_ttc:.2f} €")
         c.setFillColor(GRIS_FONCE)
-        y_offset += 8*mm
+        c.drawString(x_label, y_totaux - y_offset, "Acompte déjà versé")
+        c.setFillColor(HexColor('#27ae60'))  # Vert
+        c.setFont("Helvetica-Bold", 10)
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte_ttc:.2f} €")
+        y_offset += 5*mm
+        
+        # Acompte - Ligne 2 : référence de la facture (en petit, italique)
+        if acompte_refs and len(acompte_refs) > 0:
+            c.setFont("Helvetica-Oblique", 8)
+            c.setFillColor(HexColor('#666666'))
+            refs_text = ", ".join(acompte_refs)
+            c.drawString(x_label, y_totaux - y_offset, f"(Facture {refs_text})")
+            y_offset += 6*mm
+        else:
+            y_offset += 3*mm
+        
+        c.setFillColor(GRIS_FONCE)
         
         # Encadré RESTE À PAYER
         c.setFillColor(get_couleur_principale(data))
@@ -1258,13 +1271,32 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_avant_acompte:.2f} €")
         y_offset += 8*mm
         
-        # Acompte déjà versé
+        # Acompte déjà versé - Ligne 1 : libellé + montant
         c.setFont("Helvetica", 10)
-        c.drawString(x_label, y_totaux - y_offset, f"Acompte versé{acompte_ref_texte}")
-        c.setFillColor(HexColor('#27ae60'))  # Vert
-        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte_ttc:.2f} €")
         c.setFillColor(GRIS_FONCE)
-        y_offset += 8*mm
+        c.drawString(x_label, y_totaux - y_offset, "Acompte déjà versé")
+        c.setFillColor(HexColor('#27ae60'))  # Vert
+        c.setFont("Helvetica-Bold", 10)
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte_ttc:.2f} €")
+        y_offset += 5*mm
+        
+        # Acompte - Ligne 2 : référence de la facture (en petit, italique)
+        if acompte_references and len(acompte_references) > 0:
+            c.setFont("Helvetica-Oblique", 8)
+            c.setFillColor(HexColor('#666666'))
+            refs_text = ", ".join(acompte_references)
+            c.drawString(x_label, y_totaux - y_offset, f"(Facture {refs_text})")
+            y_offset += 6*mm
+        elif acompte_ref_texte:
+            # Fallback pour l'ancien format
+            c.setFont("Helvetica-Oblique", 8)
+            c.setFillColor(HexColor('#666666'))
+            c.drawString(x_label, y_totaux - y_offset, acompte_ref_texte.strip())
+            y_offset += 6*mm
+        else:
+            y_offset += 3*mm
+        
+        c.setFillColor(GRIS_FONCE)
         
         # Encadré RESTE À PAYER
         c.setFillColor(get_couleur_principale(data))
