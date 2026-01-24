@@ -652,10 +652,10 @@ def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_
     
     # Afficher "TVA non applicable" seulement si aucun taux > 0
     if not taux_affiches:
-        c.setFont("Helvetica-Oblique", 8)
-        c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
-        c.setFont("Helvetica", 10)
-        y_offset += 6*mm
+            c.setFont("Helvetica-Oblique", 8)
+            c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+            c.setFont("Helvetica", 10)
+            y_offset += 6*mm
     
     # Total TTC avec encadré coloré (utiliser le total_ttc recalculé)
     c.setFillColor(get_couleur_principale(data))
@@ -986,25 +986,45 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
         
         c.setFillColor(GRIS_FONCE)
         
-        # Encadré RESTE À PAYER
-        c.setFillColor(get_couleur_principale(data))
+        # Vérifier si la facture est payée
+        est_payee = getattr(data, 'statut', None) == 'payee'
+        montant_reste_a_payer = 0.0 if est_payee else reste_a_payer
+        
+        # Encadré RESTE À PAYER (ou 0€ si payée)
+        if est_payee:
+            c.setFillColor(HexColor('#27ae60'))  # Vert pour payée
+        else:
+            c.setFillColor(get_couleur_principale(data))
         c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
         c.setFillColor(white)
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
-        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{reste_a_payer:.2f} €")
+        if est_payee:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, "0,00 €")
+        else:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{montant_reste_a_payer:.2f} €")
         
-        return y_totaux - y_offset - 13*mm, total_ht_global, reste_a_payer
+        return y_totaux - y_offset - 13*mm, total_ht_global, montant_reste_a_payer
     else:
         # Pas d'acompte - Total TTC simple
-        c.setFillColor(get_couleur_principale(data))
+        est_payee = getattr(data, 'statut', None) == 'payee'
+        
+        if est_payee:
+            c.setFillColor(HexColor('#27ae60'))  # Vert pour payée
+        else:
+            c.setFillColor(get_couleur_principale(data))
         c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
         c.setFillColor(white)
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
-        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc_avant_acompte:.2f} €")
+        if est_payee:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, "0,00 €")
+        else:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc_avant_acompte:.2f} €")
         
-        return y_totaux - y_offset - 13*mm, total_ht_global, total_ttc_avant_acompte
+        return y_totaux - y_offset - 13*mm, total_ht_global, 0.0 if est_payee else total_ttc_avant_acompte
 
 
 def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
@@ -1121,7 +1141,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
             c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
             c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
             y_offset += 6*mm
-        else:
+    else:
             c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
             y_offset += 6*mm
         
@@ -1207,7 +1227,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
             c.drawString(18*mm, y_text, ligne_desc)
             y_text -= 3.5*mm
             if j == 0:
-                c.setFont("Helvetica", 9)
+        c.setFont("Helvetica", 9)
         
         # Description détaillée
         if lignes_desc_detaillee:
@@ -1247,8 +1267,8 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     # CALCUL DES TOTAUX AVEC REMISE ET TVA PAR TAUX
     # ============================================================
     
-    # Calcul de la remise
-    remise = 0
+        # Calcul de la remise
+        remise = 0
     remise_type = getattr(data, 'remise_type', None)
     remise_valeur = getattr(data, 'remise_valeur', 0) or 0
     
@@ -1331,7 +1351,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawRightString(x_value, y_totaux - y_offset, f"-{remise:.2f} €")
         c.setFillColor(GRIS_FONCE)
         y_offset += 6*mm
-        
+    
         # Total HT après remise
         c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
@@ -1344,7 +1364,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         if taux > 0 and montant > 0:
             c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
             c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
-            y_offset += 6*mm
+        y_offset += 6*mm
             tva_affichee = True
     
     # Si aucune TVA affichée (auto-entrepreneur)
@@ -1383,30 +1403,50 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
             c.setFillColor(HexColor('#666666'))
             c.drawString(x_label, y_totaux - y_offset, acompte_ref_texte.strip())
             y_offset += 6*mm
-        else:
+    else:
             y_offset += 3*mm
+    
+    c.setFillColor(GRIS_FONCE)
         
-        c.setFillColor(GRIS_FONCE)
+        # Vérifier si la facture est payée
+        est_payee = getattr(data, 'statut', None) == 'payee'
+        montant_reste_a_payer = 0.0 if est_payee else reste_a_payer
         
-        # Encadré RESTE À PAYER
-        c.setFillColor(get_couleur_principale(data))
+        # Encadré RESTE À PAYER (ou PAYÉ si statut payee)
+        if est_payee:
+            c.setFillColor(HexColor('#27ae60'))  # Vert pour payée
+        else:
+            c.setFillColor(get_couleur_principale(data))
         c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
         c.setFillColor(white)
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
-        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{reste_a_payer:.2f} €")
+        if est_payee:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, "0,00 €")
+        else:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{montant_reste_a_payer:.2f} €")
         
-        return y_totaux - y_offset - 13*mm, total_ht_apres_remise, reste_a_payer
+        return y_totaux - y_offset - 13*mm, total_ht_apres_remise, montant_reste_a_payer
     else:
         # Pas d'acompte - Total TTC simple
-        c.setFillColor(get_couleur_principale(data))
+        est_payee = getattr(data, 'statut', None) == 'payee'
+        
+        if est_payee:
+            c.setFillColor(HexColor('#27ae60'))  # Vert pour payée
+        else:
+            c.setFillColor(get_couleur_principale(data))
         c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
         c.setFillColor(white)
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
-        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc_avant_acompte:.2f} €")
+        if est_payee:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, "0,00 €")
+        else:
+            c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
+            c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc_avant_acompte:.2f} €")
         
-        return y_totaux - y_offset - 13*mm, total_ht_apres_remise, total_ttc_avant_acompte
+        return y_totaux - y_offset - 13*mm, total_ht_apres_remise, 0.0 if est_payee else total_ttc_avant_acompte
 
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
