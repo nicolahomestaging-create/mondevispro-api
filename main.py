@@ -615,7 +615,9 @@ def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_
         total_ligne = prestation.quantite * prestation.prix_unitaire
         if total_ligne > 0:  # Ignorer les acomptes
             # Utiliser le taux de TVA de la prestation si disponible, sinon le taux global
-            taux = getattr(prestation, 'tva_taux', None) or tva_taux
+            # IMPORTANT : 0 est une valeur valide (ne pas utiliser "or" qui remplacerait 0)
+            presta_tva = getattr(prestation, 'tva_taux', None)
+            taux = presta_tva if presta_tva is not None else tva_taux
             if taux not in tva_par_taux:
                 tva_par_taux[taux] = 0
             # Appliquer la remise proportionnellement si nécessaire
@@ -765,7 +767,9 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
         c.drawString(97*mm, y_colonnes, str(prestation.quantite))
         c.drawString(108*mm, y_colonnes, getattr(prestation, 'unite', 'u') or 'u')
         c.drawString(125*mm, y_colonnes, f"{prestation.prix_unitaire:.2f} €")
-        tva_prestation = getattr(prestation, 'tva_taux', None) or data.tva_taux
+        # IMPORTANT : 0 est une valeur valide pour TVA (ne pas utiliser "or")
+        presta_tva_val = getattr(prestation, 'tva_taux', None)
+        tva_prestation = presta_tva_val if presta_tva_val is not None else data.tva_taux
         c.drawString(150*mm, y_colonnes, f"{tva_prestation}%")
         c.drawRightString(width - 18*mm, y_colonnes, f"{total_ligne:.2f} €")
     
@@ -811,7 +815,13 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
     
     for i, ligne in enumerate(lignes_finales):
         ht_apres_remise = float(getattr(ligne, 'ht_apres_remise', 0) or 0)
-        tva_ligne = float(getattr(ligne, 'tva_taux', tva_taux) or tva_taux)
+        # IMPORTANT : 0 est une valeur valide pour TVA (auto-entrepreneur ou exonéré)
+        # Ne pas utiliser "or tva_taux" car 0 serait remplacé par le taux global !
+        ligne_tva = getattr(ligne, 'tva_taux', None)
+        if ligne_tva is not None:
+            tva_ligne = float(ligne_tva)
+        else:
+            tva_ligne = float(tva_taux)
         quantite = float(getattr(ligne, 'quantite', 1) or 1)
         unite = getattr(ligne, 'unite', 'u') or 'u'
         description = getattr(ligne, 'description', '') or ''
@@ -925,7 +935,7 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
     print(f"   Reste à payer: {reste_a_payer:.2f} €")
     
     # ============================================================
-    # AFFICHAGE DES TOTAUX
+    # AFFICHAGE DES TOTAUX AVEC REMISE
     # ============================================================
     y_totaux = y_ligne - 10*mm
     x_label = 130*mm
@@ -936,10 +946,49 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
     
     y_offset = 0
     
-    # Total HT (déjà après remise car lignes_finales contiennent les HT après remise)
-    c.drawString(x_label, y_totaux - y_offset, "Total HT")
-    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_global:.2f} €")
-    y_offset += 6*mm
+    # Récupérer les informations de remise depuis data
+    remise_type = getattr(data, 'remise_type', None)
+    remise_valeur = getattr(data, 'remise_valeur', 0) or 0
+    
+    # Calculer le total HT avant remise si une remise est appliquée
+    total_ht_avant_remise = total_ht_global
+    remise_montant = 0
+    
+    if remise_type and remise_valeur > 0:
+        if remise_type == "pourcentage":
+            # total_ht_global = total_avant * (1 - remise/100)
+            # donc total_avant = total_ht_global / (1 - remise/100)
+            total_ht_avant_remise = total_ht_global / (1 - remise_valeur / 100)
+            remise_montant = total_ht_avant_remise - total_ht_global
+        elif remise_type in ["montant", "fixe"]:
+            total_ht_avant_remise = total_ht_global + remise_valeur
+            remise_montant = remise_valeur
+    
+    # Afficher Total HT avant remise (si remise présente)
+    if remise_montant > 0:
+        c.drawString(x_label, y_totaux - y_offset, "Total HT avant remise")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_avant_remise:.2f} €")
+        y_offset += 6*mm
+        
+        # Afficher la remise
+        if remise_type == "pourcentage":
+            c.drawString(x_label, y_totaux - y_offset, f"Remise ({remise_valeur}%)")
+        else:
+            c.drawString(x_label, y_totaux - y_offset, "Remise")
+        c.setFillColor(HexColor('#e74c3c'))  # Rouge pour la remise
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{remise_montant:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 6*mm
+        
+        # Total HT après remise
+        c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_global:.2f} €")
+        y_offset += 6*mm
+    else:
+        # Pas de remise - Total HT simple
+        c.drawString(x_label, y_totaux - y_offset, "Total HT")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_global:.2f} €")
+        y_offset += 6*mm
     
     # TVA par taux
     tva_affichee = False
