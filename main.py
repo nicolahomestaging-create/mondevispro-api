@@ -237,7 +237,7 @@ class Entreprise(BaseModel):
     mention_legale_tva: Optional[str] = ""
     conditions_paiement: Optional[str] = "30% à la commande, solde à réception"
     delai_validite: Optional[int] = 30
-    forme_juridique: Optional[str] = "auto-entrepreneur"
+    forme_juridique: Optional[str] = None  # Ne pas forcer auto-entrepreneur par défaut
     capital_social: Optional[str] = ""
     rcs: Optional[str] = ""
     tva_intracommunautaire: Optional[str] = ""
@@ -1507,30 +1507,32 @@ def dessiner_pied_page(c, width, data, mention_tva=""):
     c.setFont("Helvetica", 7)
     
     # Récupérer les infos de forme juridique
-    forme = getattr(data.entreprise, 'forme_juridique', 'auto-entrepreneur') or 'auto-entrepreneur'
+    forme_raw = getattr(data.entreprise, 'forme_juridique', None)
+    forme = forme_raw.lower().strip() if forme_raw and forme_raw.strip() else None
     capital = getattr(data.entreprise, 'capital_social', '') or ''
     rcs = getattr(data.entreprise, 'rcs', '') or ''
     tva_intra = getattr(data.entreprise, 'tva_intracommunautaire', '') or ''
     
     # Ligne 1 : Nom + forme juridique + capital (si applicable)
-    if forme in ['sarl', 'eurl', 'sas', 'sasu', 'SARL', 'EURL', 'SAS', 'SASU']:
+    if forme in ['sarl', 'eurl', 'sas', 'sasu']:
         ligne1 = f"{data.entreprise.nom} - {forme.upper()}"
         if capital:
             ligne1 += f" au capital de {capital} €"
-    elif forme in ['ei', 'EI']:
+    elif forme in ['ei']:
         ligne1 = f"{data.entreprise.nom} - Entreprise Individuelle"
-    elif forme in ['auto-entrepreneur', 'micro-entreprise', 'Auto-entrepreneur', 'Micro-entreprise']:
+    elif forme in ['auto-entrepreneur', 'micro-entreprise', 'autoentrepreneur', 'microentreprise']:
         ligne1 = f"{data.entreprise.nom} - Auto-entrepreneur"
     else:
+        # Si pas de forme juridique définie, juste le nom
         ligne1 = f"{data.entreprise.nom}"
     
     c.drawCentredString(width/2, 28*mm, ligne1)
     
     # Ligne 2 : SIRET + RCS (si applicable)
     ligne2 = f"SIRET : {data.entreprise.siret}"
-    if rcs and forme in ['sarl', 'eurl', 'sas', 'sasu', 'SARL', 'EURL', 'SAS', 'SASU']:
+    if rcs and forme in ['sarl', 'eurl', 'sas', 'sasu']:
         ligne2 += f" - {rcs}"
-    elif forme in ['auto-entrepreneur', 'micro-entreprise', 'Auto-entrepreneur', 'Micro-entreprise']:
+    elif forme in ['auto-entrepreneur', 'micro-entreprise', 'autoentrepreneur', 'microentreprise']:
         ligne2 += " - Dispensé d'immatriculation au RCS"
     
     c.drawCentredString(width/2, 23*mm, ligne2)
@@ -2309,6 +2311,9 @@ async def generer_devis_endpoint(data: DevisRequest):
         print(f"📄 Début génération devis pour client: {data.client.nom}")
         print(f"📊 Nombre de prestations: {len(data.prestations)}")
         print(f"🎨 Couleur PDF: {data.entreprise.couleur_pdf or 'défaut'}")
+        print(f"🏢 Forme juridique: {data.entreprise.forme_juridique or 'non définie'}")
+        print(f"💰 Capital social: {data.entreprise.capital_social or 'non défini'}")
+        print(f"📋 RCS: {data.entreprise.rcs or 'non défini'}")
         print(f"📋 Numéro de devis à utiliser: '{numero_devis_recu}'")
         print(f"💰 Remise - type: '{data.remise_type}', valeur: {data.remise_valeur}, type valeur: {type(data.remise_valeur)}")
         
@@ -2467,6 +2472,9 @@ async def generer_facture_endpoint(data: FactureRequest):
         print(f"📄 Début génération facture pour client: {data.client.nom}")
         print(f"📊 Nombre de prestations: {len(data.prestations)}")
         print(f"🎨 Couleur PDF: {data.entreprise.couleur_pdf or 'défaut'}")
+        print(f"🏢 Forme juridique: {data.entreprise.forme_juridique or 'non définie'}")
+        print(f"💰 Capital social: {data.entreprise.capital_social or 'non défini'}")
+        print(f"📋 RCS: {data.entreprise.rcs or 'non défini'}")
         print(f"📋 Numéro de facture à utiliser: '{numero_facture_recu}'")
         
         # DEBUG: Vérifier les valeurs pour facture d'acompte
