@@ -1141,7 +1141,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
             c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
             c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
             y_offset += 6*mm
-    else:
+        else:
             c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
             y_offset += 6*mm
         
@@ -1227,7 +1227,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
             c.drawString(18*mm, y_text, ligne_desc)
             y_text -= 3.5*mm
             if j == 0:
-        c.setFont("Helvetica", 9)
+                c.setFont("Helvetica", 9)
         
         # Description détaillée
         if lignes_desc_detaillee:
@@ -1267,8 +1267,8 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     # CALCUL DES TOTAUX AVEC REMISE ET TVA PAR TAUX
     # ============================================================
     
-        # Calcul de la remise
-        remise = 0
+    # Calcul de la remise
+    remise = 0
     remise_type = getattr(data, 'remise_type', None)
     remise_valeur = getattr(data, 'remise_valeur', 0) or 0
     
@@ -1364,7 +1364,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         if taux > 0 and montant > 0:
             c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
             c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
-        y_offset += 6*mm
+            y_offset += 6*mm
             tva_affichee = True
     
     # Si aucune TVA affichée (auto-entrepreneur)
@@ -1403,10 +1403,10 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
             c.setFillColor(HexColor('#666666'))
             c.drawString(x_label, y_totaux - y_offset, acompte_ref_texte.strip())
             y_offset += 6*mm
-    else:
+        else:
             y_offset += 3*mm
-    
-    c.setFillColor(GRIS_FONCE)
+        
+        c.setFillColor(GRIS_FONCE)
         
         # Vérifier si la facture est payée
         est_payee = getattr(data, 'statut', None) == 'payee'
