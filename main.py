@@ -284,6 +284,8 @@ class FactureRequest(BaseModel):
     total_ttc: Optional[float] = None  # Total TTC pour factures d'acompte
     is_facture_acompte: Optional[bool] = False  # Flag pour factures d'acompte
     taux_acompte: Optional[float] = None  # Taux d'acompte en pourcentage
+    acompte_ttc_deja_facture: Optional[float] = None  # Montant TTC des acomptes déjà versés
+    acompte_references: Optional[List[str]] = None  # Numéros des factures d'acompte
 
 
 # ==================== FONCTIONS UTILITAIRES ====================
@@ -736,50 +738,120 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
 
 
 def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
-    """Dessine le tableau des prestations pour une facture avec totaux"""
+    """Dessine le tableau des prestations pour une facture avec totaux propres"""
+    
     # ============================================================
-    # CAS SPÉCIAL : FACTURE D'ACOMPTE AVEC TOTAL_TTC FOURNI
+    # DÉTECTION DU TYPE DE FACTURE
     # ============================================================
-    # Si c'est une facture d'acompte ET que total_ttc est fourni,
-    # utiliser directement ces valeurs au lieu de recalculer
     is_facture_acompte = getattr(data, 'is_facture_acompte', False)
     total_ttc_fourni = getattr(data, 'total_ttc', None)
     total_ht_fourni = getattr(data, 'total_ht', None)
+    acompte_ttc_deja_facture = getattr(data, 'acompte_ttc_deja_facture', None)
+    acompte_references = getattr(data, 'acompte_references', []) or []
     
+    print(f"📄 FACTURE - is_facture_acompte: {is_facture_acompte}")
+    print(f"   total_ttc_fourni: {total_ttc_fourni}, total_ht_fourni: {total_ht_fourni}")
+    print(f"   acompte_ttc_deja_facture: {acompte_ttc_deja_facture}")
+    print(f"   acompte_references: {acompte_references}")
+    
+    # ============================================================
+    # SÉPARER PRESTATIONS POSITIVES ET LIGNES D'ACOMPTE
+    # ============================================================
+    prestations_positives = []
+    lignes_acompte = []
+    
+    for prestation in data.prestations:
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        desc = getattr(prestation, 'description', '').lower()
+        
+        # Si c'est une ligne d'acompte (prix négatif ou description contient "acompte")
+        if total_ligne < 0 or 'acompte' in desc:
+            lignes_acompte.append(prestation)
+        else:
+            prestations_positives.append(prestation)
+    
+    print(f"   Prestations positives: {len(prestations_positives)}, Lignes acompte: {len(lignes_acompte)}")
+    
+    # ============================================================
+    # CAS FACTURE D'ACOMPTE : Affichage simple
+    # ============================================================
     if is_facture_acompte and total_ttc_fourni is not None:
-        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni: {total_ttc_fourni}")
-        print(f"   total_ht fourni: {total_ht_fourni}")
-        print(f"   tva_taux: {tva_taux}")
+        # En-tête du tableau
+        c.setFillColor(get_couleur_principale(data))
+        c.rect(15*mm, y_table, width - 30*mm, 10*mm, fill=True, stroke=False)
         
-        # Utiliser directement les valeurs fournies
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(18*mm, y_table + 3*mm, "Description")
+        c.drawString(95*mm, y_table + 3*mm, "Qté")
+        c.drawString(108*mm, y_table + 3*mm, "Unité")
+        c.drawString(125*mm, y_table + 3*mm, "P.U. HT")
+        c.drawString(150*mm, y_table + 3*mm, "TVA")
+        c.drawRightString(width - 18*mm, y_table + 3*mm, "Total HT")
+        
+        y_ligne = y_table - 2*mm
+        
+        # Utiliser les valeurs fournies
         total_ttc = float(total_ttc_fourni)
-        print(f"   total_ttc converti en float: {total_ttc}")
-        
         if total_ht_fourni is not None:
             total_ht_final = float(total_ht_fourni)
             montant_tva = total_ttc - total_ht_final
-            print(f"   Utilisation total_ht fourni: HT={total_ht_final}, TVA={montant_tva}, TTC={total_ttc}")
         elif tva_taux == 0:
-            # Si TVA = 0, HT = TTC (utiliser total_ttc fourni directement)
             total_ht_final = total_ttc
             montant_tva = 0
-            print(f"   TVA = 0, donc HT = TTC: HT={total_ht_final}, TTC={total_ttc}")
         else:
             total_ht_final = total_ttc / (1 + tva_taux / 100)
             montant_tva = total_ttc - total_ht_final
-            print(f"   Calcul HT à partir de TTC: HT={total_ht_final}, TVA={montant_tva}, TTC={total_ttc}")
         
-        # Pour l'affichage dans le tableau, utiliser total_ht_final
-        total_ht_avant_acompte = total_ht_final
-        total_acompte = 0
-        remise = 0
-        total_ht_apres_remise = total_ht_final
+        # Dessiner la ligne unique d'acompte
+        y_ligne -= 10*mm
+        c.setFillColor(HexColor('#f8f9fa'))
+        c.rect(15*mm, y_ligne, width - 30*mm, 10*mm, fill=True, stroke=False)
         
-        print(f"✅ Totaux facture d'acompte - HT: {total_ht_final:.2f}, TVA: {montant_tva:.2f}, TTC: {total_ttc:.2f}")
-    else:
-        # Calcul normal : initialiser les variables
-        total_ht_avant_acompte = 0
-        total_acompte = 0
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 9)
+        
+        desc = data.prestations[0].description if data.prestations else "Acompte"
+        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(desc, 50))
+        c.drawString(97*mm, y_ligne + 2*mm, "1")
+        c.drawString(108*mm, y_ligne + 2*mm, "")
+        c.drawString(125*mm, y_ligne + 2*mm, f"{total_ht_final:.2f} €")
+        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_taux}%")
+        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ht_final:.2f} €")
+        
+        y_ligne -= 5*mm
+        c.setStrokeColor(GRIS_CLAIR)
+        c.setLineWidth(1)
+        c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+        
+        # Totaux
+        y_totaux = y_ligne - 10*mm
+        x_label = 130*mm
+        x_value = width - 18*mm
+        
+        c.setFillColor(GRIS_FONCE)
+        c.setFont("Helvetica", 10)
+        c.drawString(x_label, y_totaux, "Total HT")
+        c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
+        
+        y_offset = 6*mm
+        if tva_taux > 0:
+            c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
+            c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
+            y_offset += 6*mm
+        else:
+            c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+            y_offset += 6*mm
+        
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc:.2f} €")
+        
+        return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc
+    
+    # ============================================================
+    # CAS FACTURE FINALE/NORMALE : Calcul complet avec TVA par taux
+    # ============================================================
     
     # En-tête du tableau
     c.setFillColor(get_couleur_principale(data))
@@ -796,50 +868,49 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     
     y_ligne = y_table - 2*mm
     
-    # Dessiner les lignes
-    for i, prestation in enumerate(data.prestations):
-        # Calculer hauteur de ligne selon contenu
+    # Calcul des totaux HT et TVA par taux (seulement prestations positives)
+    total_ht_avant_remise = 0
+    ht_par_taux = {}  # {taux: montant_ht}
+    
+    for i, prestation in enumerate(prestations_positives):
+        total_ligne = prestation.quantite * prestation.prix_unitaire
+        total_ht_avant_remise += total_ligne
+        
+        # Récupérer le taux TVA de la prestation
+        tva_prestation_raw = getattr(prestation, 'tva_taux', None)
+        tva_prestation = tva_prestation_raw if tva_prestation_raw is not None else tva_taux
+        
+        if tva_prestation not in ht_par_taux:
+            ht_par_taux[tva_prestation] = 0
+        ht_par_taux[tva_prestation] += total_ligne
+        
+        # Calculer hauteur de ligne
         hauteur_ligne = 10*mm
         description_principale = prestation.description if hasattr(prestation, 'description') else ''
         description_detaillee = getattr(prestation, 'description_detaillee', '') or ''
         notes = getattr(prestation, 'notes', '') or ''
         
-        if description_detaillee or notes:
-            lignes_detail = []
-            if description_detaillee:
-                mots_detail = description_detaillee.split()
-                ligne_courante = ""
-                for mot in mots_detail:
-                    if len(ligne_courante + " " + mot) <= 45:
-                        ligne_courante = (ligne_courante + " " + mot).strip()
-                    else:
-                        if ligne_courante:
-                            lignes_detail.append(ligne_courante)
-                        ligne_courante = mot
-                if ligne_courante:
-                    lignes_detail.append(ligne_courante)
+        lignes_detail = []
+        if description_detaillee:
+            mots_detail = description_detaillee.split()
+            ligne_courante = ""
+            for mot in mots_detail:
+                if len(ligne_courante + " " + mot) <= 45:
+                    ligne_courante = (ligne_courante + " " + mot).strip()
+                else:
+                    if ligne_courante:
+                        lignes_detail.append(ligne_courante)
+                    ligne_courante = mot
+            if ligne_courante:
+                lignes_detail.append(ligne_courante)
             
             nb_lignes_detail = len(lignes_detail)
             if notes:
                 nb_lignes_detail += 1
-            
             if nb_lignes_detail > 0:
                 hauteur_ligne = (10 + (nb_lignes_detail * 4)) * mm
         
         y_ligne -= hauteur_ligne
-        
-        # Pour facture d'acompte avec valeurs fournies, utiliser total_ht_final pour l'affichage
-        if is_facture_acompte and total_ttc_fourni is not None:
-            total_ligne = total_ht_final  # Utiliser le HT fourni pour l'affichage
-        else:
-            total_ligne = prestation.quantite * prestation.prix_unitaire
-            # Séparer les prestations positives et les acomptes (négatifs)
-            if total_ligne >= 0:
-                total_ht_avant_acompte += total_ligne
-            else:
-                total_acompte += abs(total_ligne)
-        
-        print(f"🔍 DEBUG prestation - description: {getattr(prestation, 'description', 'N/A')}, quantite: {prestation.quantite}, prix_unitaire: {prestation.prix_unitaire}, total_ligne: {total_ligne}")
         
         # Alterner les couleurs de fond
         if i % 2 == 0:
@@ -850,8 +921,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.setFont("Helvetica", 9)
         
         # Description principale
-        y_text = y_ligne + 2*mm
-        c.drawString(18*mm, y_text, tronquer_texte(description_principale, 50))
+        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(description_principale, 50))
         
         # Description détaillée et notes
         y_detail = y_ligne - 3*mm
@@ -865,9 +935,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         if notes:
             c.setFont("Helvetica-Oblique", 7)
             c.setFillColor(HexColor('#888888'))
-            notes_texte = f"Note: {tronquer_texte(notes, 55)}"
-            c.drawString(18*mm, y_detail, notes_texte)
-            y_detail -= 3.5*mm
+            c.drawString(18*mm, y_detail, f"Note: {tronquer_texte(notes, 55)}")
         
         # Colonnes standard
         c.setFont("Helvetica", 9)
@@ -875,9 +943,6 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawString(97*mm, y_ligne + 2*mm, str(prestation.quantite))
         c.drawString(108*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
         c.drawString(125*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
-        # Afficher le taux TVA de la prestation (attention: 0 est valide pour auto-entrepreneur)
-        tva_prestation_raw = getattr(prestation, 'tva_taux', None)
-        tva_prestation = tva_prestation_raw if tva_prestation_raw is not None else tva_taux
         c.drawString(150*mm, y_ligne + 2*mm, f"{tva_prestation}%")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
     
@@ -888,90 +953,151 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     c.setLineWidth(1)
     c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
     
+    # ============================================================
+    # CALCUL DES TOTAUX AVEC REMISE ET TVA PAR TAUX
+    # ============================================================
+    
+    # Calcul de la remise
+    remise = 0
+    remise_type = getattr(data, 'remise_type', None)
+    remise_valeur = getattr(data, 'remise_valeur', 0) or 0
+    
+    if remise_type and remise_valeur > 0:
+        if remise_type == "pourcentage":
+            remise = total_ht_avant_remise * (remise_valeur / 100)
+        elif remise_type in ["montant", "fixe"]:
+            remise = remise_valeur
+    
+    total_ht_apres_remise = total_ht_avant_remise - remise
+    
+    # Ratio remise pour calculer HT par taux après remise
+    ratio_remise = total_ht_apres_remise / total_ht_avant_remise if total_ht_avant_remise > 0 else 1
+    
+    # Calcul TVA par taux (après remise)
+    tva_par_taux = {}
+    for taux, montant_ht in ht_par_taux.items():
+        montant_ht_apres_remise = montant_ht * ratio_remise
+        if taux > 0:
+            tva_par_taux[taux] = montant_ht_apres_remise * (taux / 100)
+    
+    montant_tva_total = sum(tva_par_taux.values())
+    total_ttc_avant_acompte = total_ht_apres_remise + montant_tva_total
+    
+    # Calcul de l'acompte à déduire
+    total_acompte_ttc = 0
+    acompte_ref_texte = ""
+    
+    # 1. Depuis acompte_ttc_deja_facture (envoyé par le frontend)
+    if acompte_ttc_deja_facture and float(acompte_ttc_deja_facture) > 0:
+        total_acompte_ttc = float(acompte_ttc_deja_facture)
+        if acompte_references:
+            acompte_ref_texte = f" ({', '.join(acompte_references)})"
+    
+    # 2. Sinon, depuis les lignes d'acompte négatives
+    elif lignes_acompte:
+        for ligne in lignes_acompte:
+            total_acompte_ttc += abs(ligne.quantite * ligne.prix_unitaire)
+        acompte_ref_texte = ""
+    
+    # Reste à payer
+    reste_a_payer = total_ttc_avant_acompte - total_acompte_ttc
+    
+    print(f"📊 CALCULS FACTURE FINALE:")
+    print(f"   Total HT avant remise: {total_ht_avant_remise:.2f} €")
+    print(f"   Remise ({remise_type}): {remise:.2f} €")
+    print(f"   Total HT après remise: {total_ht_apres_remise:.2f} €")
+    print(f"   TVA par taux: {tva_par_taux}")
+    print(f"   Total TTC avant acompte: {total_ttc_avant_acompte:.2f} €")
+    print(f"   Acompte TTC déjà versé: {total_acompte_ttc:.2f} €")
+    print(f"   Reste à payer: {reste_a_payer:.2f} €")
+    
+    # ============================================================
+    # AFFICHAGE DES TOTAUX
+    # ============================================================
     y_totaux = y_ligne - 10*mm
-    
-    # Calculer les totaux finaux
-    if is_facture_acompte and total_ttc_fourni is not None:
-        # Les valeurs ont déjà été calculées au début de la fonction
-        # total_ttc, total_ht_final, montant_tva sont déjà définis
-        total_ht = total_ht_final
-        remise = 0
-        total_ht_apres_remise = total_ht_final
-        # montant_tva a déjà été calculé au début de la fonction
-        print(f"✅ Utilisation des totaux fournis pour facture d'acompte - HT: {total_ht_final:.2f}, TVA: {montant_tva:.2f}, TTC: {total_ttc:.2f}")
-    else:
-        # Calcul normal pour factures classiques
-        # Calcul de la remise
-        remise = 0
-        if hasattr(data, 'remise_type') and data.remise_type and hasattr(data, 'remise_valeur') and data.remise_valeur and data.remise_valeur > 0:
-            if data.remise_type == "pourcentage":
-                remise = total_ht_avant_acompte * (data.remise_valeur / 100)
-            elif data.remise_type == "montant":
-                remise = data.remise_valeur
-        
-        # Appliquer la remise, puis déduire l'acompte
-        total_ht_apres_remise = total_ht_avant_acompte - remise
-        total_ht_final = total_ht_apres_remise - total_acompte
-        montant_tva = total_ht_final * (tva_taux / 100)
-        total_ttc = total_ht_final + montant_tva
-        # Pour l'affichage, utiliser le total HT avant remise et acompte
-        total_ht = total_ht_avant_acompte
-    
     x_label = 130*mm
     x_value = width - 18*mm
+    
     c.setFillColor(GRIS_FONCE)
     c.setFont("Helvetica", 10)
-    c.drawString(x_label, y_totaux, "Total HT")
-    c.drawRightString(x_value, y_totaux, f"{total_ht:.2f} €")
     
-    # Afficher la remise si elle existe
-    y_offset = 6*mm
+    y_offset = 0
+    
+    # Total HT avant remise (ou Total HT si pas de remise)
     if remise > 0:
-        if hasattr(data, 'remise_type') and data.remise_type == "pourcentage":
-            c.drawString(x_label, y_totaux - y_offset, f"Remise ({data.remise_valeur}%)")
+        c.drawString(x_label, y_totaux - y_offset, "Total HT avant remise")
+    else:
+        c.drawString(x_label, y_totaux - y_offset, "Total HT")
+    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_avant_remise:.2f} €")
+    y_offset += 6*mm
+    
+    # Remise si présente
+    if remise > 0:
+        if remise_type == "pourcentage":
+            c.drawString(x_label, y_totaux - y_offset, f"Remise ({remise_valeur}%)")
         else:
             c.drawString(x_label, y_totaux - y_offset, "Remise")
         c.setFillColor(HexColor('#e74c3c'))
         c.drawRightString(x_value, y_totaux - y_offset, f"-{remise:.2f} €")
         c.setFillColor(GRIS_FONCE)
         y_offset += 6*mm
-    
-    # Afficher "Total HT après remise" si remise ou acompte
-    if remise > 0 or total_acompte > 0:
+        
+        # Total HT après remise
         c.drawString(x_label, y_totaux - y_offset, "Total HT après remise")
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ht_apres_remise:.2f} €")
         y_offset += 6*mm
     
-    # Afficher l'acompte si présent
-    if total_acompte > 0:
-        c.drawString(x_label, y_totaux - y_offset, "Acompte déduit")
-        c.setFillColor(HexColor('#e74c3c'))
-        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte:.2f} €")
-        c.setFillColor(GRIS_FONCE)
-        y_offset += 6*mm
+    # TVA par taux
+    tva_affichee = False
+    for taux in sorted(tva_par_taux.keys(), reverse=True):
+        montant = tva_par_taux[taux]
+        if taux > 0 and montant > 0:
+            c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux}%)")
+            c.drawRightString(x_value, y_totaux - y_offset, f"{montant:.2f} €")
+            y_offset += 6*mm
+            tva_affichee = True
     
-    if tva_taux > 0:
-        c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
-        c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
-        y_offset += 6*mm
-    else:
+    # Si aucune TVA affichée (auto-entrepreneur)
+    if not tva_affichee:
+        c.setFont("Helvetica-Oblique", 9)
         c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
+        c.setFont("Helvetica", 10)
         y_offset += 6*mm
     
-    # Total TTC
-    # Pour facture d'acompte, s'assurer qu'on utilise bien le total_ttc fourni
-    if is_facture_acompte and total_ttc_fourni is not None:
-        total_ttc_final = float(total_ttc_fourni)
-        print(f"✅ FACTURE D'ACOMPTE - Utilisation de total_ttc fourni pour TOTAL TTC: {total_ttc_final:.2f}")
+    # Total TTC avant acompte (si acompte présent)
+    if total_acompte_ttc > 0:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(x_label, y_totaux - y_offset, "Total TTC")
+        c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_avant_acompte:.2f} €")
+        y_offset += 8*mm
+        
+        # Acompte déjà versé
+        c.setFont("Helvetica", 10)
+        c.drawString(x_label, y_totaux - y_offset, f"Acompte versé{acompte_ref_texte}")
+        c.setFillColor(HexColor('#27ae60'))  # Vert
+        c.drawRightString(x_value, y_totaux - y_offset, f"-{total_acompte_ttc:.2f} €")
+        c.setFillColor(GRIS_FONCE)
+        y_offset += 8*mm
+        
+        # Encadré RESTE À PAYER
+        c.setFillColor(get_couleur_principale(data))
+        c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x_label, y_totaux - y_offset - 5*mm, "RESTE À PAYER")
+        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{reste_a_payer:.2f} €")
+        
+        return y_totaux - y_offset - 13*mm, total_ht_apres_remise, reste_a_payer
     else:
-        total_ttc_final = total_ttc
-    
-    c.setFillColor(GRIS_FONCE)
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
-    c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc_final:.2f} €")
-    
-    return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc_final
+        # Pas d'acompte - Total TTC simple
+        c.setFillColor(get_couleur_principale(data))
+        c.roundRect(x_label - 5*mm, y_totaux - y_offset - 8*mm, 68*mm, 10*mm, 2*mm, fill=True, stroke=False)
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x_label, y_totaux - y_offset - 5*mm, "TOTAL TTC")
+        c.drawRightString(x_value, y_totaux - y_offset - 5*mm, f"{total_ttc_avant_acompte:.2f} €")
+        
+        return y_totaux - y_offset - 13*mm, total_ht_apres_remise, total_ttc_avant_acompte
 
 
 def dessiner_pied_page(c, width, data, mention_tva=""):
