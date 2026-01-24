@@ -875,8 +875,9 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawString(97*mm, y_ligne + 2*mm, str(prestation.quantite))
         c.drawString(108*mm, y_ligne + 2*mm, prestation.unite if hasattr(prestation, 'unite') else 'u')
         c.drawString(125*mm, y_ligne + 2*mm, f"{prestation.prix_unitaire:.2f} €")
-        # Afficher le taux TVA de la prestation
-        tva_prestation = getattr(prestation, 'tva_taux', None) or tva_taux
+        # Afficher le taux TVA de la prestation (attention: 0 est valide pour auto-entrepreneur)
+        tva_prestation_raw = getattr(prestation, 'tva_taux', None)
+        tva_prestation = tva_prestation_raw if tva_prestation_raw is not None else tva_taux
         c.drawString(150*mm, y_ligne + 2*mm, f"{tva_prestation}%")
         c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ligne:.2f} €")
     
