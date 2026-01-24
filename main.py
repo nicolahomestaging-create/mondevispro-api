@@ -1124,7 +1124,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     print(f"   Prestations positives: {len(prestations_positives)}, Lignes acompte: {len(lignes_acompte)}")
     
     # ============================================================
-    # CAS FACTURE D'ACOMPTE : Affichage simple
+    # CAS FACTURE D'ACOMPTE : Affichage ventilé par taux de TVA
     # ============================================================
     if is_facture_acompte and total_ttc_fourni is not None:
         # En-tête du tableau
@@ -1142,38 +1142,67 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         
         y_ligne = y_table - 2*mm
         
-        # Utiliser les valeurs fournies
-        total_ttc = float(total_ttc_fourni)
-        if total_ht_fourni is not None:
-            total_ht_final = float(total_ht_fourni)
-            montant_tva = total_ttc - total_ht_final
-        elif tva_taux == 0:
-            total_ht_final = total_ttc
-            montant_tva = 0
-        else:
-            total_ht_final = total_ttc / (1 + tva_taux / 100)
-            montant_tva = total_ttc - total_ht_final
+        # Calculer les totaux par taux de TVA
+        tva_par_taux = {}
+        total_ht_calc = 0
         
-        # Dessiner la ligne unique d'acompte
-        y_ligne -= 10*mm
-        c.setFillColor(HexColor('#f8f9fa'))
-        c.rect(15*mm, y_ligne, width - 30*mm, 10*mm, fill=True, stroke=False)
+        # Dessiner chaque prestation (ventilée par TVA)
+        for idx, prestation in enumerate(data.prestations):
+            y_ligne -= 10*mm
+            
+            # Alternance de couleur de fond
+            if idx % 2 == 0:
+                c.setFillColor(HexColor('#f8f9fa'))
+            else:
+                c.setFillColor(white)
+            c.rect(15*mm, y_ligne, width - 30*mm, 10*mm, fill=True, stroke=False)
+            
+            c.setFillColor(GRIS_FONCE)
+            c.setFont("Helvetica", 9)
+            
+            # Récupérer les valeurs
+            desc = getattr(prestation, 'description', 'Acompte')
+            quantite = float(getattr(prestation, 'quantite', 1) or 1)
+            unite = getattr(prestation, 'unite', '') or ''
+            prix_unitaire = float(getattr(prestation, 'prix_unitaire', 0) or 0)
+            
+            # Récupérer le taux TVA de la prestation
+            presta_tva = getattr(prestation, 'tva_taux', None)
+            if presta_tva is not None:
+                tva_prestation = float(presta_tva)
+            else:
+                tva_prestation = tva_taux
+            
+            total_ht_ligne = quantite * prix_unitaire
+            total_ht_calc += total_ht_ligne
+            
+            # Calculer et stocker la TVA
+            montant_tva_ligne = total_ht_ligne * (tva_prestation / 100)
+            if tva_prestation not in tva_par_taux:
+                tva_par_taux[tva_prestation] = 0
+            tva_par_taux[tva_prestation] += montant_tva_ligne
+            
+            # Dessiner la ligne
+            c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(desc, 45))
+            c.drawString(97*mm, y_ligne + 2*mm, str(int(quantite)) if quantite == int(quantite) else f"{quantite:.1f}")
+            c.drawString(108*mm, y_ligne + 2*mm, unite)
+            c.drawString(125*mm, y_ligne + 2*mm, f"{prix_unitaire:.2f} €")
+            c.drawString(150*mm, y_ligne + 2*mm, f"{tva_prestation:.1f}%")
+            c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ht_ligne:.2f} €")
         
-        c.setFillColor(GRIS_FONCE)
-        c.setFont("Helvetica", 9)
-        
-        desc = data.prestations[0].description if data.prestations else "Acompte"
-        c.drawString(18*mm, y_ligne + 2*mm, tronquer_texte(desc, 50))
-        c.drawString(97*mm, y_ligne + 2*mm, "1")
-        c.drawString(108*mm, y_ligne + 2*mm, "")
-        c.drawString(125*mm, y_ligne + 2*mm, f"{total_ht_final:.2f} €")
-        c.drawString(150*mm, y_ligne + 2*mm, f"{tva_taux}%")
-        c.drawRightString(width - 18*mm, y_ligne + 2*mm, f"{total_ht_final:.2f} €")
-        
+        # Ligne de séparation
         y_ligne -= 5*mm
         c.setStrokeColor(GRIS_CLAIR)
         c.setLineWidth(1)
         c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
+        
+        # Calculer le total TVA
+        total_tva_calc = sum(tva_par_taux.values())
+        total_ttc_calc = total_ht_calc + total_tva_calc
+        
+        # Utiliser les valeurs fournies si disponibles
+        total_ttc = float(total_ttc_fourni)
+        total_ht_final = float(total_ht_fourni) if total_ht_fourni is not None else total_ht_calc
         
         # Totaux
         y_totaux = y_ligne - 10*mm
@@ -1186,19 +1215,31 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         c.drawRightString(x_value, y_totaux, f"{total_ht_final:.2f} €")
         
         y_offset = 6*mm
-        if tva_taux > 0:
-            c.drawString(x_label, y_totaux - y_offset, f"TVA ({tva_taux}%)")
-            c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
-            y_offset += 6*mm
-        else:
+        
+        # Afficher la TVA par taux
+        tva_affichee = False
+        for taux_tva, montant_tva in sorted(tva_par_taux.items()):
+            if montant_tva > 0.01:
+                c.drawString(x_label, y_totaux - y_offset, f"TVA ({taux_tva:.1f}%)")
+                c.drawRightString(x_value, y_totaux - y_offset, f"{montant_tva:.2f} €")
+                y_offset += 6*mm
+                tva_affichee = True
+        
+        # Si aucune TVA (toutes à 0%), afficher "TVA non applicable"
+        if not tva_affichee:
             c.drawString(x_label, y_totaux - y_offset, "TVA non applicable")
             y_offset += 6*mm
         
+        # Total TTC avec fond coloré
+        y_offset += 2*mm
+        c.setFillColor(get_couleur_principale(data))
+        c.rect(x_label - 5*mm, y_totaux - y_offset - 3*mm, width - x_label - 5*mm, 10*mm, fill=True, stroke=False)
+        c.setFillColor(white)
         c.setFont("Helvetica-Bold", 12)
         c.drawString(x_label, y_totaux - y_offset, "TOTAL TTC")
         c.drawRightString(x_value, y_totaux - y_offset, f"{total_ttc:.2f} €")
         
-        return y_totaux - y_offset - 5*mm, total_ht_final, total_ttc
+        return y_totaux - y_offset - 8*mm, total_ht_final, total_ttc
     
     # ============================================================
     # CAS FACTURE FINALE/NORMALE : Calcul complet avec TVA par taux
