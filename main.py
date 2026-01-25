@@ -3030,10 +3030,9 @@ Souhaitez-vous appliquer une remise ?
 
 _Répondez 1, 2 ou 3_"""}
             else:
-                # Traiter comme nouvelle prestation
+                # Traiter comme nouvelle prestation directement
                 session["state"] = ConversationState.DEVIS_COMPLET_PRESTATIONS
-                # Retraiter le message
-                return await whatsapp_webhook(From=From, Body=Body, MediaUrl0=MediaUrl0, MediaContentType0=MediaContentType0, ProfileName=ProfileName)
+                return {"response": "Entrez votre prestation au format: Description, quantité, unité, prix. Exemple: Pose carrelage, 20, m2, 45"}
         
         elif state == ConversationState.DEVIS_COMPLET_REMISE:
             if message == "1":
