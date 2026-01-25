@@ -2693,26 +2693,96 @@ def get_openai_client():
             openai_client = OpenAI(api_key=api_key)
     return openai_client
 
-# Sessions avec historique de conversation
+# Sessions avec historique de conversation (cache local + Supabase)
 whatsapp_conversations: Dict[str, Dict[str, Any]] = {}
 
+def get_supabase_client():
+    """Recupere le client Supabase"""
+    try:
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        if url and key:
+            return create_client(url, key)
+    except Exception as e:
+        print(f"Erreur Supabase client: {e}")
+    return None
+
 def get_conversation(phone: str) -> Dict[str, Any]:
-    """Recupere ou cree une conversation pour un numero"""
-    if phone not in whatsapp_conversations:
-        whatsapp_conversations[phone] = {
-            "messages": [],
-            "collected_data": {},
-            "last_activity": datetime.now().isoformat(),
-            "waiting_confirmation": False,
-            "pending_devis_data": None,
-            "last_recap": ""  # Stocker le dernier recap
-        }
-    return whatsapp_conversations[phone]
+    """Recupere ou cree une conversation depuis Supabase"""
+    # Verifier le cache local d'abord
+    if phone in whatsapp_conversations:
+        return whatsapp_conversations[phone]
+    
+    # Sinon, chercher dans Supabase
+    try:
+        supabase = get_supabase_client()
+        if supabase:
+            result = supabase.table("whatsapp_conversations").select("*").eq("phone", phone).execute()
+            if result.data and len(result.data) > 0:
+                row = result.data[0]
+                conv = {
+                    "id": row.get("id"),
+                    "messages": row.get("messages", []) or [],
+                    "last_recap": row.get("last_recap", "") or "",
+                    "waiting_confirmation": row.get("waiting_confirmation", False),
+                    "last_activity": row.get("last_activity", datetime.now().isoformat())
+                }
+                whatsapp_conversations[phone] = conv
+                print(f"Conversation chargee depuis Supabase pour {phone}")
+                return conv
+    except Exception as e:
+        print(f"Erreur lecture Supabase: {e}")
+    
+    # Creer une nouvelle conversation
+    conv = {
+        "id": None,
+        "messages": [],
+        "last_recap": "",
+        "waiting_confirmation": False,
+        "last_activity": datetime.now().isoformat()
+    }
+    whatsapp_conversations[phone] = conv
+    return conv
+
+def save_conversation(phone: str, conv: Dict[str, Any]):
+    """Sauvegarde une conversation dans Supabase"""
+    try:
+        supabase = get_supabase_client()
+        if supabase:
+            data = {
+                "phone": phone,
+                "messages": conv.get("messages", [])[-20:],  # Garder les 20 derniers messages
+                "last_recap": conv.get("last_recap", ""),
+                "waiting_confirmation": conv.get("waiting_confirmation", False),
+                "last_activity": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            
+            # Upsert (insert ou update)
+            result = supabase.table("whatsapp_conversations").upsert(
+                data, 
+                on_conflict="phone"
+            ).execute()
+            print(f"Conversation sauvegardee pour {phone}")
+            return True
+    except Exception as e:
+        print(f"Erreur sauvegarde Supabase: {e}")
+    return False
 
 def reset_conversation(phone: str):
     """Reinitialise une conversation"""
+    # Supprimer du cache local
     if phone in whatsapp_conversations:
         del whatsapp_conversations[phone]
+    
+    # Supprimer de Supabase
+    try:
+        supabase = get_supabase_client()
+        if supabase:
+            supabase.table("whatsapp_conversations").delete().eq("phone", phone).execute()
+            print(f"Conversation supprimee pour {phone}")
+    except Exception as e:
+        print(f"Erreur suppression Supabase: {e}")
 
 # Prompt systeme pour l'assistant
 ASSISTANT_SYSTEM_PROMPT = """Tu es l'assistant professionnel MonDevisPro sur WhatsApp. Tu geres TOUT: devis, factures, acomptes.
@@ -2879,6 +2949,9 @@ def call_openai_assistant(phone: str, user_message: str) -> str:
             conv["last_recap"] = assistant_response
             conv["waiting_confirmation"] = True
             print(f"RECAP STOCKE pour {phone}: {assistant_response[:100]}...")
+        
+        # SAUVEGARDER dans Supabase
+        save_conversation(phone, conv)
         
         return assistant_response
         
