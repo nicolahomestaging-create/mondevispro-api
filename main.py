@@ -3211,7 +3211,9 @@ async def whatsapp_webhook(
     MediaUrl0: Optional[str] = Form(None),
     MediaContentType0: Optional[str] = Form(None),
     ProfileName: Optional[str] = Form(None),
-    NumMedia: Optional[str] = Form("0")
+    NumMedia: Optional[str] = Form("0"),
+    MessageSid: Optional[str] = Form(None),
+    SmsMessageSid: Optional[str] = Form(None)
 ):
     """
     Webhook WhatsApp avec Assistant IA.
@@ -3221,20 +3223,28 @@ async def whatsapp_webhook(
         phone = From.replace("whatsapp:", "").strip()
         original_message = Body.strip()
         
-        # Protection anti-doublon (Twilio/Make peut envoyer plusieurs fois)
-        current_time = datetime.now()
-        last_msg = last_processed_messages.get(phone, {})
-        if (last_msg.get("message") == original_message and 
-            last_msg.get("time") and 
-            (current_time - last_msg["time"]).total_seconds() < 10):
-            print(f"MESSAGE DOUBLON IGNORE pour {phone}: {original_message[:30]}...")
-            return {"skip": True, "response": "Message doublon ignore"}  # Make.com doit filtrer sur skip=true
-        
-        # Enregistrer ce message comme traite
-        last_processed_messages[phone] = {
-            "message": original_message,
-            "time": current_time
-        }
+        # Protection anti-doublon avec MessageSid (Twilio envoie un ID unique par message)
+        msg_sid = MessageSid or SmsMessageSid or ""
+        if msg_sid:
+            if msg_sid in last_processed_messages:
+                print(f"MESSAGE DOUBLON IGNORE (SID: {msg_sid}) pour {phone}")
+                return {"skip": True, "response": "Message doublon ignore"}
+            # Enregistrer ce SID comme traite
+            last_processed_messages[msg_sid] = datetime.now()
+            # Nettoyer les vieux SIDs (plus de 5 minutes)
+            old_sids = [sid for sid, time in last_processed_messages.items() 
+                       if isinstance(time, datetime) and (datetime.now() - time).total_seconds() > 300]
+            for sid in old_sids:
+                del last_processed_messages[sid]
+        else:
+            # Fallback si pas de SID: utiliser message + temps
+            current_time = datetime.now()
+            cache_key = f"{phone}:{original_message[:50]}"
+            last_time = last_processed_messages.get(cache_key)
+            if last_time and isinstance(last_time, datetime) and (current_time - last_time).total_seconds() < 5:
+                print(f"MESSAGE DOUBLON IGNORE (no SID) pour {phone}: {original_message[:30]}...")
+                return {"skip": True, "response": "Message doublon ignore"}
+            last_processed_messages[cache_key] = current_time
         
         print(f"WhatsApp de {phone}")
         print(f"  Body: {original_message[:50] if original_message else '(vide)'}...")
