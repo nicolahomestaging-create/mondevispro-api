@@ -2783,11 +2783,36 @@ def call_openai_assistant(phone: str, user_message: str) -> str:
         print(f"Erreur OpenAI: {e}")
         return "Desole, erreur technique. Reessayez ou tapez menu."
 
+def clean_json_string(json_str: str) -> str:
+    """Nettoie une chaine JSON pour la rendre valide"""
+    # Remplacer les accents
+    replacements = {
+        'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+        'à': 'a', 'â': 'a', 'ä': 'a',
+        'ù': 'u', 'û': 'u', 'ü': 'u',
+        'ô': 'o', 'ö': 'o',
+        'î': 'i', 'ï': 'i',
+        'ç': 'c',
+        'É': 'E', 'È': 'E', 'Ê': 'E',
+        'À': 'A', 'Â': 'A',
+        'Ù': 'U', 'Û': 'U',
+        'Ô': 'O',
+        'Î': 'I',
+        'Ç': 'C',
+        '€': 'euros',
+        '²': '2',
+        '\n': ' ',
+        '\r': ' ',
+        '\t': ' ',
+    }
+    for old, new in replacements.items():
+        json_str = json_str.replace(old, new)
+    return json_str
+
 def parse_assistant_response(response: str) -> Dict[str, Any]:
     """Parse la reponse de l'assistant pour detecter les actions JSON"""
     
     # Methode 1: Chercher un JSON complet avec "action" et "data"
-    # Utilise une approche de comptage d'accolades
     def extract_json(text):
         start = text.find('{"action"')
         if start == -1:
@@ -2814,6 +2839,8 @@ def parse_assistant_response(response: str) -> Dict[str, Any]:
     # Essayer d'extraire le JSON
     json_str = extract_json(response)
     if json_str:
+        # Nettoyer le JSON
+        json_str = clean_json_string(json_str)
         try:
             data = json.loads(json_str)
             if "action" in data and data["action"] in ["generate_devis", "generate_facture"]:
@@ -2821,11 +2848,13 @@ def parse_assistant_response(response: str) -> Dict[str, Any]:
                 return data
         except json.JSONDecodeError as e:
             print(f"Erreur parsing JSON: {e}")
+            print(f"JSON problematique: {json_str[:200]}...")
     
     # Methode 2: Essayer de parser la reponse complete
     try:
-        if response.strip().startswith("{"):
-            data = json.loads(response.strip())
+        cleaned = clean_json_string(response.strip())
+        if cleaned.startswith("{"):
+            data = json.loads(cleaned)
             if "action" in data:
                 return data
     except:
