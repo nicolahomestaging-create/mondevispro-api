@@ -2982,24 +2982,101 @@ def parse_assistant_response(response: str) -> Dict[str, Any]:
     return {"action": "reply", "message": response}
 
 
+def transcribe_audio_from_url(audio_url: str) -> str:
+    """Telecharge et transcrit un fichier audio avec Whisper"""
+    try:
+        print(f"Telechargement audio: {audio_url}")
+        
+        # Telecharger le fichier audio
+        # Note: Pour Twilio, il faut parfois s'authentifier
+        twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+        twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+        
+        if twilio_sid and twilio_token:
+            response = requests.get(audio_url, auth=(twilio_sid, twilio_token))
+        else:
+            response = requests.get(audio_url)
+        
+        if response.status_code != 200:
+            print(f"Erreur telechargement audio: {response.status_code}")
+            return ""
+        
+        # Sauvegarder temporairement
+        temp_file = f"/tmp/audio_{uuid.uuid4().hex}.ogg"
+        with open(temp_file, "wb") as f:
+            f.write(response.content)
+        
+        print(f"Audio sauvegarde: {temp_file} ({len(response.content)} bytes)")
+        
+        # Transcrire avec Whisper
+        client = get_openai_client()
+        if not client:
+            print("OpenAI non configure pour Whisper")
+            return ""
+        
+        with open(temp_file, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="fr"
+            )
+        
+        # Supprimer le fichier temp
+        try:
+            os.remove(temp_file)
+        except:
+            pass
+        
+        transcribed_text = transcript.text.strip()
+        print(f"Transcription Whisper: {transcribed_text[:100]}...")
+        return transcribed_text
+        
+    except Exception as e:
+        print(f"Erreur transcription Whisper: {e}")
+        return ""
+
+
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(
     From: str = Form(""),
     Body: str = Form(""),
     MediaUrl0: Optional[str] = Form(None),
     MediaContentType0: Optional[str] = Form(None),
-    ProfileName: Optional[str] = Form(None)
+    ProfileName: Optional[str] = Form(None),
+    NumMedia: Optional[str] = Form("0")
 ):
     """
     Webhook WhatsApp avec Assistant IA.
-    OpenAI guide la conversation et extrait les donnees.
+    Gere texte ET audio (transcription Whisper integree).
     """
     try:
         phone = From.replace("whatsapp:", "").strip()
         original_message = Body.strip()
+        
+        print(f"WhatsApp de {phone}")
+        print(f"  Body: {original_message[:50] if original_message else '(vide)'}...")
+        print(f"  NumMedia: {NumMedia}, MediaUrl0: {MediaUrl0}")
+        print(f"  MediaContentType0: {MediaContentType0}")
+        
+        # Si c'est un message audio, transcrire avec Whisper
+        if MediaUrl0 and MediaContentType0:
+            content_type = MediaContentType0.lower()
+            if "audio" in content_type or "ogg" in content_type:
+                print("Message vocal detecte, transcription en cours...")
+                transcribed = transcribe_audio_from_url(MediaUrl0)
+                if transcribed:
+                    original_message = transcribed
+                    print(f"Message transcrit: {original_message[:100]}...")
+                else:
+                    return {"response": "Desole, je n ai pas pu comprendre votre message vocal. Pouvez-vous reessayer ou ecrire ?"}
+        
+        # Si pas de message (ni texte ni audio transcrit)
+        if not original_message:
+            return {"response": "Je n ai pas recu de message. Tapez menu pour commencer."}
+        
         message_lower = original_message.lower()
         
-        print(f"WhatsApp de {phone}: {original_message[:50]}...")
+        print(f"Message final a traiter: {original_message[:50]}...")
         
         # Commande de reinitialisation
         if message_lower in ["annuler", "cancel", "stop", "reset", "recommencer"]:
