@@ -2698,9 +2698,15 @@ whatsapp_conversations: Dict[str, Dict[str, Any]] = {}
 
 def get_supabase_client():
     """Recupere le client Supabase"""
+    # Utiliser le client global deja configure
+    global supabase_client
+    if supabase_client:
+        return supabase_client
+    
+    # Sinon essayer de le creer
     try:
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
+        url = SUPABASE_URL
+        key = SUPABASE_SERVICE_KEY
         if url and key:
             return create_client(url, key)
     except Exception as e:
