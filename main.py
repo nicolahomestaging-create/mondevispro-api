@@ -2663,210 +2663,30 @@ def debug_env():
     }
 
 
-# ==================== CHATBOT WHATSAPP ====================
-# Système conversationnel pour créer des devis/factures via WhatsApp
+# ==================== CHATBOT WHATSAPP SIMPLIFIE ====================
+# Système simple : menu + envoi à OpenAI pour extraction complète
 
-from enum import Enum
 from typing import Dict, Any
-import json
-import re
 
-# États de la conversation
-class ConversationState(str, Enum):
-    MENU_PRINCIPAL = "menu_principal"
-    CHOIX_TYPE_DEVIS = "choix_type_devis"
-    # Devis simplifié
-    DEVIS_SIMPLE_ATTENTE = "devis_simple_attente"
-    # Devis complet - étapes
-    DEVIS_COMPLET_CLIENT_NOM = "devis_complet_client_nom"
-    DEVIS_COMPLET_CLIENT_EMAIL = "devis_complet_client_email"
-    DEVIS_COMPLET_CLIENT_TEL = "devis_complet_client_tel"
-    DEVIS_COMPLET_CLIENT_ADRESSE = "devis_complet_client_adresse"
-    DEVIS_COMPLET_TITRE_PROJET = "devis_complet_titre_projet"
-    DEVIS_COMPLET_PRESTATIONS = "devis_complet_prestations"
-    DEVIS_COMPLET_AJOUT_PRESTATION = "devis_complet_ajout_prestation"
-    DEVIS_COMPLET_REMISE = "devis_complet_remise"
-    DEVIS_COMPLET_DELAI = "devis_complet_delai"
-    DEVIS_COMPLET_CONFIRMATION = "devis_complet_confirmation"
-    # Facture
-    FACTURE_NUMERO_DEVIS = "facture_numero_devis"
-    FACTURE_CONFIRMATION = "facture_confirmation"
-    # Mes documents
-    MES_DOCUMENTS = "mes_documents"
+# Sessions simples (juste pour savoir si on attend un type de document)
+whatsapp_sessions: Dict[str, str] = {}
 
-# Stockage des sessions (en production, utiliser Redis ou Supabase)
-whatsapp_sessions: Dict[str, Dict[str, Any]] = {}
+def get_user_state(phone: str) -> str:
+    """Retourne l'état de l'utilisateur (menu, devis, facture)"""
+    return whatsapp_sessions.get(phone, "menu")
 
-def get_session(phone_number: str) -> Dict[str, Any]:
-    """Récupère ou crée une session pour un numéro de téléphone"""
-    if phone_number not in whatsapp_sessions:
-        whatsapp_sessions[phone_number] = {
-            "state": ConversationState.MENU_PRINCIPAL,
-            "data": {},
-            "prestations": [],
-            "last_activity": datetime.now().isoformat()
-        }
-    return whatsapp_sessions[phone_number]
+def set_user_state(phone: str, state: str):
+    """Définit l'état de l'utilisateur"""
+    whatsapp_sessions[phone] = state
 
-def reset_session(phone_number: str):
-    """Réinitialise une session"""
-    if phone_number in whatsapp_sessions:
-        del whatsapp_sessions[phone_number]
+def reset_user_state(phone: str):
+    """Remet l'utilisateur au menu"""
+    if phone in whatsapp_sessions:
+        del whatsapp_sessions[phone]
 
-def parse_prestation_naturelle(texte: str) -> Optional[Dict[str, Any]]:
-    """
-    Parse une prestation décrite en langage naturel.
-    Comprend des formats comme:
-    - "pose carrelage 20m² à 45€"
-    - "plomberie 800€"
-    - "2h de main d'oeuvre à 50€/h"
-    - "fourniture carrelage 20m2 35 euros"
-    - "peinture 3 jours 250€/jour"
-    """
-    import re
-    
-    texte = texte.lower().strip()
-    
-    # Nettoyer le texte
-    texte = texte.replace("€", " euros ").replace("²", "2").replace("'", " ")
-    texte = re.sub(r'\s+', ' ', texte)
-    
-    # Patterns pour les prix
-    prix_patterns = [
-        r'(\d+(?:[.,]\d+)?)\s*euros?(?:\s*/\s*|\s*par\s*|\s*le\s*)?(\w+)?',  # 45 euros, 45€/m2
-        r'a\s*(\d+(?:[.,]\d+)?)\s*euros?',  # à 45 euros
-        r'(\d+(?:[.,]\d+)?)\s*e(?:ur)?(?:\s*/\s*|\s*par\s*)?(\w+)?',  # 45e, 45e/m2
-    ]
-    
-    # Patterns pour les quantités avec unités
-    quantite_patterns = [
-        r'(\d+(?:[.,]\d+)?)\s*(m2|m²|m3|ml|h|heure|heures|jour|jours|unite|unites|lot|lots|kg|piece|pieces)',
-        r'(\d+(?:[.,]\d+)?)\s*(metre|metres)\s*(carre|carres|lineaire|lineaires|cube|cubes)',
-    ]
-    
-    # Extraire le prix
-    prix = None
-    unite_prix = None
-    for pattern in prix_patterns:
-        match = re.search(pattern, texte)
-        if match:
-            prix = float(match.group(1).replace(',', '.'))
-            if len(match.groups()) > 1 and match.group(2):
-                unite_prix = match.group(2)
-            break
-    
-    if prix is None:
-        # Chercher juste un nombre qui pourrait être un prix
-        nombres = re.findall(r'(\d+(?:[.,]\d+)?)', texte)
-        if nombres:
-            # Prendre le plus grand nombre comme prix probable
-            prix = max(float(n.replace(',', '.')) for n in nombres)
-    
-    if prix is None:
-        return None
-    
-    # Extraire la quantité et l'unité
-    quantite = 1
-    unite = "forfait"
-    
-    for pattern in quantite_patterns:
-        match = re.search(pattern, texte)
-        if match:
-            quantite = float(match.group(1).replace(',', '.'))
-            unite_raw = match.group(2) if len(match.groups()) >= 2 else ""
-            
-            # Normaliser l'unité
-            if 'm2' in unite_raw or 'carre' in unite_raw:
-                unite = "m2"
-            elif 'm3' in unite_raw or 'cube' in unite_raw:
-                unite = "m3"
-            elif 'ml' in unite_raw or 'lineaire' in unite_raw:
-                unite = "ml"
-            elif 'h' in unite_raw or 'heure' in unite_raw:
-                unite = "heure"
-            elif 'jour' in unite_raw:
-                unite = "jour"
-            elif 'kg' in unite_raw:
-                unite = "kg"
-            elif 'lot' in unite_raw:
-                unite = "lot"
-            elif 'piece' in unite_raw or 'unite' in unite_raw:
-                unite = "unite"
-            else:
-                unite = unite_raw
-            break
-    
-    # Si prix par unité détecté, ajuster
-    if unite_prix and quantite == 1:
-        # Le prix est unitaire, on garde quantite = 1 et unite = forfait par défaut
-        # sauf si on a trouvé une quantité
-        pass
-    
-    # Extraire la description (tout ce qui n'est pas prix/quantité)
-    description = texte
-    # Enlever les patterns de prix et quantité
-    description = re.sub(r'\d+(?:[.,]\d+)?\s*euros?(?:\s*/\s*\w+)?', '', description)
-    description = re.sub(r'\d+(?:[.,]\d+)?\s*e(?:ur)?(?:\s*/\s*\w+)?', '', description)
-    description = re.sub(r'a\s+$', '', description)
-    description = re.sub(r'\d+(?:[.,]\d+)?\s*(?:m2|m3|ml|h|heure|heures|jour|jours|unite|unites|lot|lots|kg|piece|pieces)', '', description)
-    description = re.sub(r'\s+', ' ', description).strip()
-    
-    # Nettoyer la description
-    mots_vides = ['de', 'du', 'le', 'la', 'les', 'a', 'au', 'aux', 'par', 'pour', 'et', 'ou']
-    mots = description.split()
-    mots = [m for m in mots if m not in mots_vides or len(mots) <= 3]
-    description = ' '.join(mots).strip()
-    
-    if not description:
-        description = "Prestation"
-    
-    # Capitaliser la première lettre
-    description = description.capitalize()
-    
-    return {
-        "description": description,
-        "quantite": quantite,
-        "unite": unite,
-        "prix_unitaire": prix
-    }
+# Code simplifié - OpenAI extrait tout
 
-class WhatsAppMessage(BaseModel):
-    """Message entrant WhatsApp (format Twilio)"""
-    From: str  # Numéro de l'expéditeur (format: whatsapp:+33...)
-    Body: str  # Contenu du message
-    MediaUrl0: Optional[str] = None  # URL du média (vocal)
-    MediaContentType0: Optional[str] = None
-    ProfileName: Optional[str] = None  # Nom du profil WhatsApp
-
-class WhatsAppResponse(BaseModel):
-    """Réponse à envoyer via WhatsApp"""
-    message: str
-    buttons: Optional[List[Dict[str, str]]] = None  # Pour les boutons interactifs
-    list_items: Optional[List[Dict[str, str]]] = None  # Pour les listes
-
-def format_whatsapp_buttons(buttons: List[Dict[str, str]]) -> str:
-    """Formate les boutons pour WhatsApp (texte si pas de support natif)"""
-    result = "\n\n"
-    for i, btn in enumerate(buttons, 1):
-        result += f"*{i}.* {btn['title']}\n"
-    result += "\n_Répondez avec le numéro de votre choix_"
-    return result
-
-def get_menu_principal() -> str:
-    """Retourne le menu principal"""
-    return "Bienvenue sur MonDevisPro! 1=Devis rapide 2=Devis complet 3=Devis vers facture 4=Mes documents 5=Aide. Repondez avec le numero."
-
-def get_help_message() -> str:
-    """Retourne le message d'aide"""
-    return "Aide MonDevisPro: Devis rapide=envoyez un message vocal ou texte. Devis complet=guide etape par etape. Commandes: menu, annuler, aide. Support: contact@mondevispro.fr"
-
-class WhatsAppWebhookRequest(BaseModel):
-    """Requête webhook WhatsApp"""
-    From: str = ""
-    Body: str = ""
-    MediaUrl0: Optional[str] = None
-    MediaContentType0: Optional[str] = None
-    ProfileName: Optional[str] = None
+# ==================== WEBHOOK WHATSAPP SIMPLIFIE ====================
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(
@@ -2877,83 +2697,62 @@ async def whatsapp_webhook(
     ProfileName: Optional[str] = Form(None)
 ):
     """
-    Webhook principal pour recevoir les messages WhatsApp via Twilio.
-    Gère la conversation de manière interactive.
-    Accepte form-urlencoded.
+    Webhook WhatsApp SIMPLIFIE.
+    3 modes: devis rapide, devis complet (tout en un message), facture.
+    OpenAI extrait tout: client, titre projet, prestations, remise, acompte, delai.
     """
     try:
-        
-        # Nettoyer le numéro de téléphone
         phone = From.replace("whatsapp:", "").strip()
         message = Body.strip().lower()
         original_message = Body.strip()
         
-        print(f"📱 WhatsApp reçu de {phone}: {original_message[:50]}...")
+        print(f"WhatsApp de {phone}: {original_message[:50]}...")
         
-        # Récupérer la session
-        session = get_session(phone)
-        session["last_activity"] = datetime.now().isoformat()
+        # Etat actuel
+        state = get_user_state(phone)
         
-        # Commandes globales
-        if message in ["menu", "accueil", "start", "bonjour", "hello", "salut", "hi"]:
-            session["state"] = ConversationState.MENU_PRINCIPAL
-            session["data"] = {}
-            session["prestations"] = []
-            return {"response": get_menu_principal()}
+        # === COMMANDES GLOBALES ===
+        if message in ["menu", "start", "bonjour", "hello", "hi", "salut"]:
+            reset_user_state(phone)
+            return {"response": "MonDevisPro - Tapez 1 pour Devis rapide, 2 pour Devis complet, 3 pour Facture depuis devis"}
         
         if message in ["annuler", "cancel", "stop"]:
-            session["state"] = ConversationState.MENU_PRINCIPAL
-            session["data"] = {}
-            session["prestations"] = []
-            return {"response": "Operation annulee. " + get_menu_principal()}
+            reset_user_state(phone)
+            return {"response": "Annule. Tapez menu pour recommencer."}
         
-        if message in ["aide", "help", "?"]:
-            return {"response": get_help_message()}
-        
-        # Gestion par état
-        state = session["state"]
-        
-        # ========== MENU PRINCIPAL ==========
-        if state == ConversationState.MENU_PRINCIPAL:
+        # === MENU PRINCIPAL ===
+        if state == "menu":
             if message == "1":
-                session["state"] = ConversationState.DEVIS_SIMPLE_ATTENTE
-                return {"response": "Mode Devis Rapide. Envoyez votre devis en un message vocal ou texte. Exemple: Devis pour M. Dupont, carrelage 20m2 a 45 euros, plomberie 800 euros. Tapez menu pour revenir."}
+                set_user_state(phone, "devis_attente")
+                return {"response": "DEVIS RAPIDE - Decrivez votre devis en un message ou vocal. Exemple: Devis pour M. Dupont, carrelage 20m2 a 45e, plomberie 800e"}
             
             elif message == "2":
-                session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_NOM
-                session["data"] = {}
-                session["prestations"] = []
-                return {"response": "Mode Devis Complet. Etape 1/8 - Quel est le nom du client? Exemple: Monsieur Jean Dupont"}
+                set_user_state(phone, "devis_complet_attente")
+                return {"response": "DEVIS COMPLET - Decrivez tout en un message: client (nom adresse email tel), titre projet unique, prestations avec prix, remise si besoin, acompte si besoin, delai. Exemple: Client M. Martin 12 rue Paris paris@mail.com 0612345678, projet Renovation cuisine janvier 2025, pose carrelage 15m2 45e/m2, pose evier 300e forfait, remise 10 pourcent, acompte 30 pourcent, delai 3 semaines"}
             
             elif message == "3":
-                session["state"] = ConversationState.FACTURE_NUMERO_DEVIS
-                return {"response": "Transformer Devis en Facture. Quel est le numero du devis? Exemple: DEV-20250125-001"}
-            
-            elif message == "4":
-                session["state"] = ConversationState.MES_DOCUMENTS
-                return {"response": "Consultez vos documents sur https://mondevispro.fr/dashboard/documents - Tapez menu pour revenir."}
-            
-            elif message == "5":
-                return {"response": get_help_message()}
+                set_user_state(phone, "facture_attente")
+                return {"response": "FACTURE - Donnez le numero du devis. Exemple: DEV-20250125-001"}
             
             else:
-                # Message non reconnu au menu principal - traiter comme devis rapide
-                session["state"] = ConversationState.DEVIS_SIMPLE_ATTENTE
-                # Retourner les données pour traitement par Make.com
+                # Message direct sans passer par menu = devis rapide
+                reset_user_state(phone)
                 return {
-                    "response": "Je traite votre demande...",
-                    "action": "process_devis_simple",
+                    "response": "Je traite votre devis...",
+                    "action": "process_devis",
                     "message_content": original_message,
                     "phone": phone,
-                    "profile_name": ProfileName
+                    "profile_name": ProfileName,
+                    "media_url": MediaUrl0,
+                    "media_type": MediaContentType0
                 }
         
-        # ========== DEVIS SIMPLE ==========
-        elif state == ConversationState.DEVIS_SIMPLE_ATTENTE:
-            # Retourner les données pour traitement par Make.com/OpenAI
+        # === ATTENTE DEVIS RAPIDE ===
+        elif state == "devis_attente":
+            reset_user_state(phone)
             return {
                 "response": "Je genere votre devis...",
-                "action": "process_devis_simple",
+                "action": "process_devis",
                 "message_content": original_message,
                 "phone": phone,
                 "profile_name": ProfileName,
@@ -2961,216 +2760,42 @@ async def whatsapp_webhook(
                 "media_type": MediaContentType0
             }
         
-        # ========== DEVIS COMPLET - ÉTAPES ==========
-        elif state == ConversationState.DEVIS_COMPLET_CLIENT_NOM:
-            session["data"]["client_nom"] = original_message
-            session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_EMAIL
-            return {"response": f"Client: {original_message}. Etape 2/8 - Email du client? (tapez passer si vous ne l'avez pas)"}
+        # === ATTENTE DEVIS COMPLET ===
+        elif state == "devis_complet_attente":
+            reset_user_state(phone)
+            return {
+                "response": "Je genere votre devis complet...",
+                "action": "process_devis_complet",
+                "message_content": original_message,
+                "phone": phone,
+                "profile_name": ProfileName
+            }
         
-        elif state == ConversationState.DEVIS_COMPLET_CLIENT_EMAIL:
-            if message != "passer":
-                session["data"]["client_email"] = original_message
-            session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_TEL
-            return {"response": f"Email: {original_message if message != 'passer' else 'Non renseigne'}. Etape 3/8 - Telephone du client? (tapez passer si vous ne l'avez pas)"}
+        # === ATTENTE FACTURE ===
+        elif state == "facture_attente":
+            reset_user_state(phone)
+            return {
+                "response": "Je cree votre facture...",
+                "action": "process_facture",
+                "numero_devis": original_message.upper().strip(),
+                "phone": phone,
+                "profile_name": ProfileName
+            }
         
-        elif state == ConversationState.DEVIS_COMPLET_CLIENT_TEL:
-            if message != "passer":
-                session["data"]["client_telephone"] = original_message
-            session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_ADRESSE
-            return {"response": f"Telephone: {original_message if message != 'passer' else 'Non renseigne'}. Etape 4/8 - Adresse du client? (tapez passer si vous ne l'avez pas)"}
-        
-        elif state == ConversationState.DEVIS_COMPLET_CLIENT_ADRESSE:
-            if message != "passer":
-                session["data"]["client_adresse"] = original_message
-            session["state"] = ConversationState.DEVIS_COMPLET_TITRE_PROJET
-            return {"response": f"Adresse: {original_message if message != 'passer' else 'Non renseigne'}. Etape 5/8 - Titre du projet? Exemple: Renovation salle de bain"}
-        
-        elif state == ConversationState.DEVIS_COMPLET_TITRE_PROJET:
-            session["data"]["titre_projet"] = original_message
-            session["state"] = ConversationState.DEVIS_COMPLET_PRESTATIONS
-            return {"response": f"Projet enregistre: {original_message}. Etape 6/8 - Decrivez votre premiere prestation naturellement. Exemple: pose carrelage 20m2 a 45 euros ou plomberie 800 euros"}
-        
-        elif state == ConversationState.DEVIS_COMPLET_PRESTATIONS:
-            # Parser intelligent qui comprend le langage naturel
-            prestation = parse_prestation_naturelle(original_message)
-            
-            if prestation:
-                session["prestations"].append(prestation)
-                total_ligne = prestation["quantite"] * prestation["prix_unitaire"]
-                
-                session["state"] = ConversationState.DEVIS_COMPLET_AJOUT_PRESTATION
-                
-                # Résumé des prestations
-                total_ht = sum(p["quantite"] * p["prix_unitaire"] for p in session["prestations"])
-                nb_prestations = len(session["prestations"])
-                
-                return {
-                    "response": f"Prestation ajoutee: {prestation['description']} - {total_ligne:.2f}E. Total: {total_ht:.2f}E HT ({nb_prestations} prestation(s)). Repondez 1 pour ajouter une autre prestation ou 2 pour continuer."
-                }
-            else:
-                return {
-                    "response": "Je n'ai pas compris. Decrivez votre prestation naturellement. Exemple: pose carrelage 20m2 a 45 euros ou plomberie 800 euros forfait"
-                }
-        
-        elif state == ConversationState.DEVIS_COMPLET_AJOUT_PRESTATION:
-            if message == "1":
-                session["state"] = ConversationState.DEVIS_COMPLET_PRESTATIONS
-                return {"response": "Decrivez votre nouvelle prestation. Exemple: fourniture carrelage 20m2 a 35 euros"}
-            elif message == "2":
-                session["state"] = ConversationState.DEVIS_COMPLET_REMISE
-                return {"response": "Etape 7/8 - Remise. Voulez-vous appliquer une remise? Repondez: 1 pour pas de remise, 2 pour remise en %, 3 pour remise en euros"}
-            else:
-                # Traiter comme nouvelle prestation directement
-                session["state"] = ConversationState.DEVIS_COMPLET_PRESTATIONS
-                return {"response": "Decrivez votre prestation naturellement. Exemple: pose carrelage 20m2 a 45 euros"}
-        
-        elif state == ConversationState.DEVIS_COMPLET_REMISE:
-            if message == "1":
-                session["state"] = ConversationState.DEVIS_COMPLET_DELAI
-                return {"response": "OK pas de remise. Etape 8/8 - Quel est le delai de realisation? Exemple: 2 semaines (ou tapez passer)"}
-            elif message == "2":
-                session["data"]["remise_type"] = "pourcentage"
-                return {"response": "Quel pourcentage de remise? Exemple: 10"}
-            elif message == "3":
-                session["data"]["remise_type"] = "fixe"
-                return {"response": "Quel montant de remise en euros? Exemple: 50"}
-            else:
-                # C'est la valeur de remise
-                try:
-                    remise_valeur = float(message.replace(",", ".").replace("%", "").replace("€", "").strip())
-                    session["data"]["remise_valeur"] = remise_valeur
-                    session["state"] = ConversationState.DEVIS_COMPLET_DELAI
-                    remise_type = session["data"].get("remise_type", "pourcentage")
-                    symbole = "%" if remise_type == "pourcentage" else "€"
-                    return {"response": f"Remise: {remise_valeur}{symbole}. Etape 8/8 - Delai de realisation? Exemple: 2 semaines (ou tapez passer)"}
-                except:
-                    return {"response": "Valeur non valide. Entrez un nombre. Exemple: 10"}
-        
-        elif state == ConversationState.DEVIS_COMPLET_DELAI:
-            if message != "passer":
-                session["data"]["delai"] = original_message
-            else:
-                session["data"]["delai"] = "À définir"
-            
-            session["state"] = ConversationState.DEVIS_COMPLET_CONFIRMATION
-            
-            # Générer le récapitulatif
-            data = session["data"]
-            prestations = session["prestations"]
-            
-            total_ht = sum(p["quantite"] * p["prix_unitaire"] for p in prestations)
-            
-            # Appliquer la remise
-            remise_type = data.get("remise_type")
-            remise_valeur = data.get("remise_valeur", 0)
-            if remise_type == "pourcentage" and remise_valeur > 0:
-                total_ht = total_ht * (1 - remise_valeur / 100)
-            elif remise_type == "fixe" and remise_valeur > 0:
-                total_ht = total_ht - remise_valeur
-            
-            # Construire le récapitulatif simple
-            prestations_txt = ", ".join([f"{p['description']} {p['quantite']}{p['unite']} {p['prix_unitaire']}E" for p in prestations])
-            recap = f"RECAPITULATIF: Client={data.get('client_nom', '?')}, Projet={data.get('titre_projet', '?')}, Prestations=[{prestations_txt}], Total={total_ht:.2f}E HT. Repondez 1 pour generer ou 2 pour annuler."
-            
-            return {"response": recap}
-        
-        elif state == ConversationState.DEVIS_COMPLET_CONFIRMATION:
-            if message == "1":
-                # Préparer les données pour génération
-                data = session["data"]
-                prestations = session["prestations"]
-                
-                devis_data = {
-                    "client_nom": data.get("client_nom", ""),
-                    "client_email": data.get("client_email"),
-                    "client_telephone": data.get("client_telephone"),
-                    "client_adresse": data.get("client_adresse"),
-                    "titre_projet": data.get("titre_projet"),
-                    "prestations": prestations,
-                    "delai": data.get("delai", "À définir"),
-                    "remise_type": data.get("remise_type"),
-                    "remise_valeur": data.get("remise_valeur", 0)
-                }
-                
-                # Réinitialiser la session
-                session["state"] = ConversationState.MENU_PRINCIPAL
-                session["data"] = {}
-                session["prestations"] = []
-                
-                return {
-                    "response": "Je genere votre devis complet...",
-                    "action": "generate_devis_complet",
-                    "devis_data": devis_data,
-                    "phone": phone,
-                    "profile_name": ProfileName
-                }
-            else:
-                session["state"] = ConversationState.MENU_PRINCIPAL
-                session["data"] = {}
-                session["prestations"] = []
-                return {"response": "Devis annule. " + get_menu_principal()}
-        
-        # ========== FACTURE ==========
-        elif state == ConversationState.FACTURE_NUMERO_DEVIS:
-            # Valider le format du numéro de devis
-            numero_devis = original_message.upper().strip()
-            session["data"]["numero_devis"] = numero_devis
-            session["state"] = ConversationState.FACTURE_CONFIRMATION
-            
-            return {"response": f"Transformer devis {numero_devis} en facture? Repondez 1 pour confirmer ou 2 pour annuler."}
-        
-        elif state == ConversationState.FACTURE_CONFIRMATION:
-            if message == "1":
-                numero_devis = session["data"].get("numero_devis")
-                
-                session["state"] = ConversationState.MENU_PRINCIPAL
-                session["data"] = {}
-                
-                return {
-                    "response": "Je cree votre facture...",
-                    "action": "convert_devis_to_facture",
-                    "numero_devis": numero_devis,
-                    "phone": phone,
-                    "profile_name": ProfileName
-                }
-            else:
-                session["state"] = ConversationState.MENU_PRINCIPAL
-                session["data"] = {}
-                return {"response": "Conversion annulee. " + get_menu_principal()}
-        
-        # État non géré - retour au menu
+        # === ETAT INCONNU ===
         else:
-            session["state"] = ConversationState.MENU_PRINCIPAL
-            return {"response": get_menu_principal()}
+            reset_user_state(phone)
+            return {"response": "Tapez menu pour commencer."}
     
     except Exception as e:
-        print(f"❌ Erreur webhook WhatsApp: {e}")
-        return {"response": f"Erreur survenue. Tapez menu pour recommencer."}
+        print(f"Erreur webhook: {e}")
+        return {"response": "Erreur. Tapez menu pour recommencer."}
 
 
 @app.get("/webhook/whatsapp/sessions")
 async def get_whatsapp_sessions():
-    """Debug : voir les sessions actives"""
-    return {
-        "total_sessions": len(whatsapp_sessions),
-        "sessions": {
-            phone: {
-                "state": session["state"],
-                "prestations_count": len(session.get("prestations", [])),
-                "last_activity": session.get("last_activity")
-            }
-            for phone, session in whatsapp_sessions.items()
-        }
-    }
-
-
-@app.delete("/webhook/whatsapp/sessions/{phone}")
-async def delete_whatsapp_session(phone: str):
-    """Debug : supprimer une session"""
-    if phone in whatsapp_sessions:
-        del whatsapp_sessions[phone]
-        return {"message": f"Session {phone} supprimée"}
-    return {"message": f"Session {phone} non trouvée"}
+    """Debug: voir les sessions actives"""
+    return {"sessions": whatsapp_sessions}
 
 
 if __name__ == "__main__":
