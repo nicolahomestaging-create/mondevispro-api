@@ -2729,12 +2729,11 @@ COMPORTEMENT:
 - Si l'utilisateur veut une facture -> demande le numero du devis
 - Si l'utilisateur dit "annuler" -> reinitialise
 
-QUAND TOUTES LES INFOS SONT COLLECTEES:
-1. Dis a l'utilisateur "Je genere votre devis, un instant..."
-2. Puis sur une NOUVELLE LIGNE, ecris UNIQUEMENT le JSON (rien d'autre):
+QUAND L'UTILISATEUR CONFIRME (oui, ok, c'est bon, valide, genere, etc.):
+Reponds UNIQUEMENT avec ce JSON, RIEN D'AUTRE (pas de texte avant ni apres):
 {"action": "generate_devis", "data": {"client_nom": "...", "client_adresse": "...", "client_email": "...", "client_telephone": "...", "titre_projet": "...", "prestations": [{"description": "...", "quantite": 1, "unite": "...", "prix_unitaire": 0}], "remise_type": "pourcentage ou fixe ou null", "remise_valeur": 0, "acompte_pourcentage": 0, "delai": "..."}}
 
-IMPORTANT: Ne dis JAMAIS "Voici le JSON" - ecris juste le JSON directement apres ton message.
+TRES IMPORTANT: Quand l'utilisateur dit "oui", "ok", "c'est bon", "valide" apres un recapitulatif, tu dois IMMEDIATEMENT repondre avec le JSON ci-dessus. Pas de texte, juste le JSON.
 
 Pour une facture:
 {"action": "generate_facture", "data": {"numero_devis": "DEV-..."}}
