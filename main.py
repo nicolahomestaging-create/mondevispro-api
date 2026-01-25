@@ -2740,11 +2740,20 @@ POUR UN DEVIS - INFOS A COLLECTER:
 - delai: texte (optionnel)
 
 COMPORTEMENT INTELLIGENT:
-1. Si l'utilisateur donne TOUTES les infos en un message -> fais un recap et demande confirmation
-2. Si des infos manquent -> demande UNIQUEMENT ce qui manque
-3. Si l'utilisateur dit "oui", "ok", "c'est bon", "valide", "genere", "parfait", "go" -> GENERE IMMEDIATEMENT LE JSON
-4. Ne redemande JAMAIS des infos deja donnees
-5. Retiens TOUT ce que l'utilisateur a dit dans la conversation
+1. Si l'utilisateur donne les infos -> TOUJOURS faire un recap et demander confirmation
+2. JAMAIS generer directement sans confirmation explicite de l'utilisateur
+3. Si des infos manquent -> demande UNIQUEMENT ce qui manque
+4. UNIQUEMENT apres que l'utilisateur dit "oui", "ok", "valide", "go", "genere" -> genere le JSON
+5. Ne redemande JAMAIS des infos deja donnees
+6. Retiens TOUT ce que l'utilisateur a dit dans la conversation
+
+FLUX OBLIGATOIRE:
+Etape 1: Utilisateur donne les infos
+Etape 2: Tu fais un RECAP complet et tu demandes "Reponds OK pour generer!"
+Etape 3: Utilisateur confirme (ok, oui, go, etc.)
+Etape 4: Tu generes le JSON
+
+JAMAIS SAUTER L'ETAPE 2!
 
 REPONSE CONFIRMATION (avant de generer):
 Fais un recap CLAIR et LISIBLE avec des tirets:
