@@ -8,12 +8,15 @@ from fastapi import FastAPI, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 import uuid
+import json
+import re
 from datetime import datetime, timedelta
 import requests
 from io import BytesIO
+from openai import OpenAI
 
 # PDF
 from reportlab.lib.pagesizes import A4
@@ -2663,30 +2666,144 @@ def debug_env():
     }
 
 
-# ==================== CHATBOT WHATSAPP SIMPLIFIE ====================
-# Système simple : menu + envoi à OpenAI pour extraction complète
+# ==================== ASSISTANT IA WHATSAPP ====================
+# Système conversationnel intelligent avec OpenAI GPT-4o-mini
 
-from typing import Dict, Any
+# Client OpenAI
+openai_client = None
+def get_openai_client():
+    global openai_client
+    if openai_client is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            openai_client = OpenAI(api_key=api_key)
+    return openai_client
 
-# Sessions simples (juste pour savoir si on attend un type de document)
-whatsapp_sessions: Dict[str, str] = {}
+# Sessions avec historique de conversation
+whatsapp_conversations: Dict[str, Dict[str, Any]] = {}
 
-def get_user_state(phone: str) -> str:
-    """Retourne l'état de l'utilisateur (menu, devis, facture)"""
-    return whatsapp_sessions.get(phone, "menu")
+def get_conversation(phone: str) -> Dict[str, Any]:
+    """Recupere ou cree une conversation pour un numero"""
+    if phone not in whatsapp_conversations:
+        whatsapp_conversations[phone] = {
+            "messages": [],
+            "collected_data": {},
+            "last_activity": datetime.now().isoformat()
+        }
+    return whatsapp_conversations[phone]
 
-def set_user_state(phone: str, state: str):
-    """Définit l'état de l'utilisateur"""
-    whatsapp_sessions[phone] = state
+def reset_conversation(phone: str):
+    """Reinitialise une conversation"""
+    if phone in whatsapp_conversations:
+        del whatsapp_conversations[phone]
 
-def reset_user_state(phone: str):
-    """Remet l'utilisateur au menu"""
-    if phone in whatsapp_sessions:
-        del whatsapp_sessions[phone]
+# Prompt systeme pour l'assistant
+ASSISTANT_SYSTEM_PROMPT = """Tu es l'assistant MonDevisPro sur WhatsApp. Tu aides les artisans a creer des devis et factures.
 
-# Code simplifié - OpenAI extrait tout
+REGLES IMPORTANTES:
+1. Sois bref et amical (messages WhatsApp courts)
+2. Guide l'utilisateur etape par etape
+3. Comprends le langage naturel meme avec des fautes
+4. Quand tu as TOUTES les infos, genere le JSON
 
-# ==================== WEBHOOK WHATSAPP SIMPLIFIE ====================
+INFORMATIONS A COLLECTER POUR UN DEVIS:
+- client_nom (obligatoire): nom du client
+- client_adresse (optionnel): adresse complete
+- client_email (optionnel): email
+- client_telephone (optionnel): telephone
+- titre_projet (obligatoire): titre UNIQUE du projet (ex: "Renovation SDB janvier 2025")
+- prestations (obligatoire): liste avec description, quantite, unite, prix_unitaire
+- remise_type (optionnel): "pourcentage" ou "fixe"
+- remise_valeur (optionnel): valeur numerique
+- acompte_pourcentage (optionnel): pourcentage d'acompte (ex: 30)
+- delai (optionnel): delai de realisation
+
+POUR UNE FACTURE:
+- numero_devis (obligatoire): numero du devis a transformer (ex: DEV-20250125-001)
+
+COMPORTEMENT:
+- Si l'utilisateur dit "bonjour", "salut", "menu" -> presente les options
+- Si l'utilisateur veut un devis -> collecte les infos progressivement
+- Si l'utilisateur veut une facture -> demande le numero du devis
+- Si l'utilisateur dit "annuler" -> reinitialise
+
+QUAND TOUTES LES INFOS SONT COLLECTEES:
+Reponds UNIQUEMENT avec un JSON dans ce format exact (pas de texte avant/apres):
+{"action": "generate_devis", "data": {...toutes les donnees...}}
+
+ou pour une facture:
+{"action": "generate_facture", "data": {"numero_devis": "DEV-..."}}
+
+EXEMPLES DE COMPREHENSION:
+- "carrelage 20m2 45e" = prestation: carrelage, 20, m2, 45
+- "plomberie 800 euros" = prestation: plomberie, 1, forfait, 800
+- "remise 10%" = remise_type: pourcentage, remise_valeur: 10
+- "acompte 30%" = acompte_pourcentage: 30
+
+Sois naturel et aide l'utilisateur!"""
+
+def call_openai_assistant(phone: str, user_message: str) -> str:
+    """Appelle OpenAI avec l'historique de conversation"""
+    client = get_openai_client()
+    if not client:
+        return "Erreur: OpenAI non configure. Contactez le support."
+    
+    conv = get_conversation(phone)
+    conv["last_activity"] = datetime.now().isoformat()
+    
+    # Ajouter le message utilisateur a l'historique
+    conv["messages"].append({"role": "user", "content": user_message})
+    
+    # Limiter l'historique a 20 messages pour eviter les couts
+    messages_to_send = conv["messages"][-20:]
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": ASSISTANT_SYSTEM_PROMPT},
+                *messages_to_send
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        assistant_response = response.choices[0].message.content.strip()
+        
+        # Ajouter la reponse a l'historique
+        conv["messages"].append({"role": "assistant", "content": assistant_response})
+        
+        return assistant_response
+        
+    except Exception as e:
+        print(f"Erreur OpenAI: {e}")
+        return "Desole, erreur technique. Reessayez ou tapez menu."
+
+def parse_assistant_response(response: str) -> Dict[str, Any]:
+    """Parse la reponse de l'assistant pour detecter les actions"""
+    # Chercher un JSON dans la reponse
+    try:
+        # Essayer de parser directement
+        if response.strip().startswith("{"):
+            data = json.loads(response)
+            if "action" in data:
+                return data
+    except:
+        pass
+    
+    # Chercher un JSON dans le texte
+    json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', response, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group())
+            if "action" in data:
+                return data
+        except:
+            pass
+    
+    # Pas d'action, juste du texte
+    return {"action": "reply", "message": response}
+
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(
@@ -2697,105 +2814,80 @@ async def whatsapp_webhook(
     ProfileName: Optional[str] = Form(None)
 ):
     """
-    Webhook WhatsApp SIMPLIFIE.
-    3 modes: devis rapide, devis complet (tout en un message), facture.
-    OpenAI extrait tout: client, titre projet, prestations, remise, acompte, delai.
+    Webhook WhatsApp avec Assistant IA.
+    OpenAI guide la conversation et extrait les donnees.
     """
     try:
         phone = From.replace("whatsapp:", "").strip()
-        message = Body.strip().lower()
         original_message = Body.strip()
+        message_lower = original_message.lower()
         
         print(f"WhatsApp de {phone}: {original_message[:50]}...")
         
-        # Etat actuel
-        state = get_user_state(phone)
+        # Commande de reinitialisation
+        if message_lower in ["annuler", "cancel", "stop", "reset", "recommencer"]:
+            reset_conversation(phone)
+            return {"response": "Conversation reinitialisee. Tapez menu pour commencer."}
         
-        # === COMMANDES GLOBALES ===
-        if message in ["menu", "start", "bonjour", "hello", "hi", "salut"]:
-            reset_user_state(phone)
-            return {"response": "MonDevisPro - Tapez 1 pour Devis rapide, 2 pour Devis complet, 3 pour Facture depuis devis"}
+        # Appeler l'assistant OpenAI
+        assistant_response = call_openai_assistant(phone, original_message)
         
-        if message in ["annuler", "cancel", "stop"]:
-            reset_user_state(phone)
-            return {"response": "Annule. Tapez menu pour recommencer."}
+        # Parser la reponse pour detecter les actions
+        parsed = parse_assistant_response(assistant_response)
         
-        # === MENU PRINCIPAL ===
-        if state == "menu":
-            if message == "1":
-                set_user_state(phone, "devis_attente")
-                return {"response": "DEVIS RAPIDE - Decrivez votre devis en un message ou vocal. Exemple: Devis pour M. Dupont, carrelage 20m2 a 45e, plomberie 800e"}
-            
-            elif message == "2":
-                set_user_state(phone, "devis_complet_attente")
-                return {"response": "DEVIS COMPLET - Decrivez tout en un message: client (nom adresse email tel), titre projet unique, prestations avec prix, remise si besoin, acompte si besoin, delai. Exemple: Client M. Martin 12 rue Paris paris@mail.com 0612345678, projet Renovation cuisine janvier 2025, pose carrelage 15m2 45e/m2, pose evier 300e forfait, remise 10 pourcent, acompte 30 pourcent, delai 3 semaines"}
-            
-            elif message == "3":
-                set_user_state(phone, "facture_attente")
-                return {"response": "FACTURE - Donnez le numero du devis. Exemple: DEV-20250125-001"}
-            
-            else:
-                # Message direct sans passer par menu = devis rapide
-                reset_user_state(phone)
-                return {
-                    "response": "Je traite votre devis...",
-                    "action": "process_devis",
-                    "message_content": original_message,
-                    "phone": phone,
-                    "profile_name": ProfileName,
-                    "media_url": MediaUrl0,
-                    "media_type": MediaContentType0
-                }
-        
-        # === ATTENTE DEVIS RAPIDE ===
-        elif state == "devis_attente":
-            reset_user_state(phone)
+        if parsed["action"] == "generate_devis":
+            # L'assistant a collecte toutes les infos pour un devis
+            reset_conversation(phone)
             return {
                 "response": "Je genere votre devis...",
-                "action": "process_devis",
-                "message_content": original_message,
-                "phone": phone,
-                "profile_name": ProfileName,
-                "media_url": MediaUrl0,
-                "media_type": MediaContentType0
-            }
-        
-        # === ATTENTE DEVIS COMPLET ===
-        elif state == "devis_complet_attente":
-            reset_user_state(phone)
-            return {
-                "response": "Je genere votre devis complet...",
-                "action": "process_devis_complet",
-                "message_content": original_message,
+                "action": "generate_devis",
+                "devis_data": parsed.get("data", {}),
                 "phone": phone,
                 "profile_name": ProfileName
             }
         
-        # === ATTENTE FACTURE ===
-        elif state == "facture_attente":
-            reset_user_state(phone)
+        elif parsed["action"] == "generate_facture":
+            # L'assistant a le numero de devis pour la facture
+            reset_conversation(phone)
             return {
                 "response": "Je cree votre facture...",
-                "action": "process_facture",
-                "numero_devis": original_message.upper().strip(),
+                "action": "generate_facture",
+                "numero_devis": parsed.get("data", {}).get("numero_devis", ""),
                 "phone": phone,
                 "profile_name": ProfileName
             }
         
-        # === ETAT INCONNU ===
         else:
-            reset_user_state(phone)
-            return {"response": "Tapez menu pour commencer."}
+            # Reponse textuelle normale
+            return {"response": parsed.get("message", assistant_response)}
     
     except Exception as e:
         print(f"Erreur webhook: {e}")
-        return {"response": "Erreur. Tapez menu pour recommencer."}
+        return {"response": "Erreur technique. Tapez menu pour recommencer."}
 
 
 @app.get("/webhook/whatsapp/sessions")
 async def get_whatsapp_sessions():
-    """Debug: voir les sessions actives"""
-    return {"sessions": whatsapp_sessions}
+    """Debug: voir les conversations actives"""
+    return {
+        "total": len(whatsapp_conversations),
+        "sessions": {
+            phone: {
+                "messages_count": len(conv["messages"]),
+                "last_activity": conv["last_activity"]
+            }
+            for phone, conv in whatsapp_conversations.items()
+        }
+    }
+
+
+@app.delete("/webhook/whatsapp/sessions/{phone}")
+async def delete_whatsapp_session(phone: str):
+    """Supprimer une session"""
+    if phone in whatsapp_conversations:
+        del whatsapp_conversations[phone]
+        return {"message": f"Session {phone} supprimee"}
+    return {"message": f"Session {phone} non trouvee"}
 
 
 if __name__ == "__main__":
