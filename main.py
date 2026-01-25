@@ -303,6 +303,8 @@ class FactureRequest(BaseModel):
     statut: Optional[str] = "en_attente"  # "en_attente", "payee", etc.
     total_ht: Optional[float] = None  # Total HT pour factures d'acompte
     total_ttc: Optional[float] = None  # Total TTC pour factures d'acompte
+    total_ht_devis: Optional[float] = None  # Total HT du devis (avec remise)
+    total_ttc_devis: Optional[float] = None  # Total TTC du devis (avec remise)
     is_facture_acompte: Optional[bool] = False  # Flag pour factures d'acompte
     taux_acompte: Optional[float] = None  # Taux d'acompte en pourcentage
     acompte_ttc_deja_facture: Optional[float] = None  # Montant TTC des acomptes déjà versés
@@ -2553,20 +2555,33 @@ async def generer_facture_endpoint(data: FactureRequest):
         # CALCUL AUTOMATIQUE DU MONTANT D'ACOMPTE SI taux_acompte fourni
         # ============================================================
         if is_facture_acompte and taux_acompte and taux_acompte > 0:
-            # Calculer le total HT à partir des prestations
-            tva_taux = getattr(data.entreprise, 'tva_taux', 20) or 20
-            total_ht_calcule = 0
-            for p in data.prestations:
-                total_ht_calcule += p.prix_unitaire * p.quantite
-            total_ttc_calcule = total_ht_calcule * (1 + tva_taux / 100)
+            # PRIORITÉ : Utiliser total_ht_devis/total_ttc_devis (inclut la remise)
+            total_ht_devis = getattr(data, 'total_ht_devis', None)
+            total_ttc_devis = getattr(data, 'total_ttc_devis', None)
+            
+            if total_ht_devis and total_ttc_devis:
+                # Utiliser les totaux du devis (avec remise déjà appliquée)
+                print(f"📊 UTILISATION DES TOTAUX DU DEVIS (avec remise):")
+                print(f"   Total HT devis: {total_ht_devis}")
+                print(f"   Total TTC devis: {total_ttc_devis}")
+                total_ht_base = total_ht_devis
+                total_ttc_base = total_ttc_devis
+            else:
+                # Fallback : Calculer à partir des prestations (sans remise)
+                tva_taux = getattr(data.entreprise, 'tva_taux', 20) or 20
+                total_ht_base = 0
+                for p in data.prestations:
+                    total_ht_base += p.prix_unitaire * p.quantite
+                total_ttc_base = total_ht_base * (1 + tva_taux / 100)
+                print(f"⚠️ CALCUL DEPUIS PRESTATIONS (sans remise):")
+                print(f"   Total HT calculé: {total_ht_base}")
+                print(f"   Total TTC calculé: {total_ttc_base}")
             
             # Appliquer le taux d'acompte
-            total_ht_acompte = total_ht_calcule * taux_acompte / 100
-            total_ttc_acompte = total_ttc_calcule * taux_acompte / 100
+            total_ht_acompte = round(total_ht_base * taux_acompte / 100, 2)
+            total_ttc_acompte = round(total_ttc_base * taux_acompte / 100, 2)
             
             print(f"📊 CALCUL ACOMPTE:")
-            print(f"   Total HT devis: {total_ht_calcule}")
-            print(f"   Total TTC devis: {total_ttc_calcule}")
             print(f"   Taux acompte: {taux_acompte}%")
             print(f"   Total HT acompte: {total_ht_acompte}")
             print(f"   Total TTC acompte: {total_ttc_acompte}")
