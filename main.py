@@ -2730,13 +2730,25 @@ COMPORTEMENT:
 - Si l'utilisateur dit "annuler" -> reinitialise
 
 QUAND L'UTILISATEUR CONFIRME (oui, ok, c'est bon, valide, genere, etc.):
-Reponds UNIQUEMENT avec ce JSON, RIEN D'AUTRE (pas de texte avant ni apres):
-{"action": "generate_devis", "data": {"client_nom": "...", "client_adresse": "...", "client_email": "...", "client_telephone": "...", "titre_projet": "...", "prestations": [{"description": "...", "quantite": 1, "unite": "...", "prix_unitaire": 0}], "remise_type": "pourcentage ou fixe ou null", "remise_valeur": 0, "acompte_pourcentage": 0, "delai": "..."}}
+Reponds UNIQUEMENT avec le JSON suivant en REMPLACANT les valeurs par les VRAIES donnees collectees:
+{"action": "generate_devis", "data": {"client_nom": "NOM_REEL_DU_CLIENT", "client_adresse": "ADRESSE_REELLE", "client_email": "EMAIL_REEL", "client_telephone": "TELEPHONE_REEL", "titre_projet": "TITRE_REEL_DU_PROJET", "prestations": [{"description": "DESCRIPTION_REELLE", "quantite": NOMBRE_REEL, "unite": "UNITE_REELLE", "prix_unitaire": PRIX_REEL}], "remise_type": null, "remise_valeur": 0, "acompte_pourcentage": 0, "delai": "DELAI_REEL"}}
 
-TRES IMPORTANT: Quand l'utilisateur dit "oui", "ok", "c'est bon", "valide" apres un recapitulatif, tu dois IMMEDIATEMENT repondre avec le JSON ci-dessus. Pas de texte, juste le JSON.
+ATTENTION CRITIQUE:
+- NE JAMAIS mettre "..." comme valeur
+- NE JAMAIS mettre "NOM_REEL_DU_CLIENT" comme valeur
+- TOUJOURS utiliser les VRAIES informations que l'utilisateur t'a donnees pendant la conversation
+- Si une info n'a pas ete donnee, mettre une chaine vide "" ou null ou 0
+
+EXEMPLE CONCRET - Si l'utilisateur a dit:
+- Client: Jean Dupont
+- Adresse: 12 rue de Paris
+- Prestation: carrelage 20m2 a 45 euros
+
+Tu dois repondre:
+{"action": "generate_devis", "data": {"client_nom": "Jean Dupont", "client_adresse": "12 rue de Paris", "client_email": "", "client_telephone": "", "titre_projet": "Devis carrelage", "prestations": [{"description": "carrelage", "quantite": 20, "unite": "m2", "prix_unitaire": 45}], "remise_type": null, "remise_valeur": 0, "acompte_pourcentage": 0, "delai": ""}}
 
 Pour une facture:
-{"action": "generate_facture", "data": {"numero_devis": "DEV-..."}}
+{"action": "generate_facture", "data": {"numero_devis": "NUMERO_REEL_DU_DEVIS"}}
 
 EXEMPLES DE COMPREHENSION:
 - "carrelage 20m2 45e" = prestation: carrelage, 20, m2, 45
