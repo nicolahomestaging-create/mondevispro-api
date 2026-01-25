@@ -2916,21 +2916,21 @@ async def whatsapp_webhook(data: WhatsAppWebhookRequest):
         if state == ConversationState.MENU_PRINCIPAL:
             if message == "1":
                 session["state"] = ConversationState.DEVIS_SIMPLE_ATTENTE
-            return {"response": "Mode Devis Rapide. Envoyez votre devis en un message vocal ou texte. Exemple: Devis pour M. Dupont, carrelage 20m2 a 45 euros, plomberie 800 euros. Tapez menu pour revenir."}
+                return {"response": "Mode Devis Rapide. Envoyez votre devis en un message vocal ou texte. Exemple: Devis pour M. Dupont, carrelage 20m2 a 45 euros, plomberie 800 euros. Tapez menu pour revenir."}
             
             elif message == "2":
                 session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_NOM
                 session["data"] = {}
                 session["prestations"] = []
-            return {"response": "Mode Devis Complet. Etape 1/8 - Quel est le nom du client? Exemple: Monsieur Jean Dupont"}
+                return {"response": "Mode Devis Complet. Etape 1/8 - Quel est le nom du client? Exemple: Monsieur Jean Dupont"}
             
             elif message == "3":
                 session["state"] = ConversationState.FACTURE_NUMERO_DEVIS
-            return {"response": "Transformer Devis en Facture. Quel est le numero du devis? Exemple: DEV-20250125-001"}
+                return {"response": "Transformer Devis en Facture. Quel est le numero du devis? Exemple: DEV-20250125-001"}
             
             elif message == "4":
                 session["state"] = ConversationState.MES_DOCUMENTS
-            return {"response": "Consultez vos documents sur https://mondevispro.fr/dashboard/documents - Tapez menu pour revenir."}
+                return {"response": "Consultez vos documents sur https://mondevispro.fr/dashboard/documents - Tapez menu pour revenir."}
             
             elif message == "5":
                 return {"response": get_help_message()}
