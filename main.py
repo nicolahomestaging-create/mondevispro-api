@@ -258,19 +258,25 @@ class DevisRequest(BaseModel):
     client: Client
     prestations: List[Prestation]
     tva_taux: float = 20.0
-    conditions_paiement: str = "30% à la commande, solde à réception"
-    delai_realisation: str = "À définir"
+    conditions_paiement: str = "30% a la commande, solde a reception"
+    delai_realisation: str = "A definir"
     validite_jours: int = 30
     remise_type: Optional[str] = None  # "pourcentage" ou "fixe"
     remise_valeur: Optional[float] = 0
-    numero_devis: Optional[str] = None  # Numéro de devis fourni par le client (OBLIGATOIRE)
+    acompte_pourcentage: Optional[float] = 0
+    numero_devis: Optional[str] = None  # Numero de devis fourni par le client (OBLIGATOIRE)
 
 class DevisDataFromAI(BaseModel):
     client_nom: str
+    client_adresse: Optional[str] = ""
+    client_email: Optional[str] = ""
+    client_telephone: Optional[str] = ""
+    titre_projet: Optional[str] = ""
     prestations: List[Prestation]
-    delai: Optional[str] = "À définir"
+    delai: Optional[str] = "A definir"
     remise_type: Optional[str] = None
     remise_valeur: Optional[float] = 0
+    acompte_pourcentage: Optional[float] = 0
 
 class DevisRequestSimple(BaseModel):
     entreprise: Entreprise
@@ -2439,13 +2445,20 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         tva_taux = data.entreprise.tva_taux if data.entreprise.tva_taux is not None else 20.0
         conditions = data.entreprise.conditions_paiement or "30% à la commande, solde à réception"
         
+        # Extraire les donnees client
+        client_adresse = getattr(data.devis_data, 'client_adresse', '') or ''
+        client_email = getattr(data.devis_data, 'client_email', '') or ''
+        client_telephone = getattr(data.devis_data, 'client_telephone', '') or ''
+        acompte = getattr(data.devis_data, 'acompte_pourcentage', 0) or 0
+        
         full_data = DevisRequest(
             entreprise=data.entreprise,
             client=Client(
                 nom=data.devis_data.client_nom,
-                adresse="",
+                adresse=client_adresse,
                 cp_ville="",
-                tel=""
+                tel=client_telephone,
+                email=client_email
             ),
             prestations=data.devis_data.prestations,
             tva_taux=tva_taux,
@@ -2454,7 +2467,8 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
             validite_jours=data.validite_jours,
             remise_type=data.devis_data.remise_type,
             remise_valeur=data.devis_data.remise_valeur or 0,
-            numero_devis=None  # Pour l'IA, on peut générer un nouveau numéro
+            acompte_pourcentage=acompte,
+            numero_devis=None  # Pour l'IA, on peut generer un nouveau numero
         )
         
         # Générer PDF
