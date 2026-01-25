@@ -2759,14 +2759,28 @@ Fais un recap clair:
 Dis moi ok pour generer!"
 
 QUAND L'UTILISATEUR CONFIRME (oui/ok/valide/go/parfait/c'est bon/genere):
-Reponds UNIQUEMENT avec le JSON, RIEN D'AUTRE, pas de texte avant ni apres:
-{"action": "generate_devis", "data": {"client_nom": "VALEUR_REELLE", "client_adresse": "VALEUR_REELLE", "client_email": "VALEUR_REELLE", "client_telephone": "VALEUR_REELLE", "titre_projet": "VALEUR_REELLE", "prestations": [{"description": "VALEUR", "quantite": NOMBRE, "unite": "VALEUR", "prix_unitaire": NOMBRE}], "remise_type": "pourcentage", "remise_valeur": NOMBRE, "acompte_pourcentage": NOMBRE, "delai": "VALEUR"}}
+Reponds UNIQUEMENT avec le JSON en utilisant les VRAIES DONNEES de la conversation.
 
-ATTENTION ABSOLUE:
-- Quand utilisateur dit OUI/OK apres recap -> JSON IMMEDIAT, pas de question!
-- JAMAIS "..." ou "VALEUR_REELLE" dans le JSON final
-- Utilise les VRAIES donnees de la conversation
-- Si info absente: "" pour texte, null pour type, 0 pour nombre
+EXEMPLE - Si la conversation contenait:
+- Client: Pierre
+- Adresse: Rue des fesses 83140
+- Email: vanloo.nicola@gmail.com
+- Tel: 0605108023
+- Projet: Renovation Didier
+- Prestation: carrelage 50m2 a 45 euros
+- Remise: 20%
+- Acompte: 30%
+
+Tu reponds EXACTEMENT:
+{"action": "generate_devis", "data": {"client_nom": "Pierre", "client_adresse": "Rue des fesses 83140", "client_email": "vanloo.nicola@gmail.com", "client_telephone": "0605108023", "titre_projet": "Renovation Didier", "prestations": [{"description": "carrelage", "quantite": 50, "unite": "m2", "prix_unitaire": 45}], "remise_type": "pourcentage", "remise_valeur": 20, "acompte_pourcentage": 30, "delai": ""}}
+
+REGLES ABSOLUES POUR LE JSON:
+- JAMAIS de placeholders (VALEUR_REELLE, NOMBRE, VALEUR, etc.)
+- JAMAIS de "..." 
+- Utilise EXACTEMENT les donnees que l'utilisateur a fournies
+- Les nombres sont sans guillemets: 50, 45, 20, 30
+- Les textes sont avec guillemets: "Pierre", "carrelage"
+- Si info manquante: "" pour texte, null pour remise_type, 0 pour nombres
 
 FACTURE ACOMPTE (numero devis + pourcentage):
 {"action": "generate_facture_acompte", "data": {"numero_devis": "DEV-XXXXXXXX-XXXXX", "taux_acompte": 30}}
