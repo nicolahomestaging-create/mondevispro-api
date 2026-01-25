@@ -2459,7 +2459,11 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         if not prestations_list and data.devis_data.prestations_json:
             try:
                 import json
-                parsed = json.loads(data.devis_data.prestations_json)
+                from urllib.parse import unquote
+                # Decoder l'URL encoding si present
+                json_str = unquote(data.devis_data.prestations_json)
+                print(f"📋 Prestations JSON decodee: {json_str[:200]}...")
+                parsed = json.loads(json_str)
                 prestations_list = [Prestation(**p) for p in parsed]
                 print(f"✅ Prestations parsees depuis JSON string: {len(prestations_list)} lignes")
             except Exception as e:
