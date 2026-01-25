@@ -2767,19 +2767,28 @@ _"Devis pour M. Dupont, carrelage 20m² à 45€/m², plomberie 500€"_
 
 📞 Support : contact@mondevispro.fr"""
 
+class WhatsAppWebhookRequest(BaseModel):
+    """Requête webhook WhatsApp"""
+    From: str = ""
+    Body: str = ""
+    MediaUrl0: Optional[str] = None
+    MediaContentType0: Optional[str] = None
+    ProfileName: Optional[str] = None
+
 @app.post("/webhook/whatsapp")
-async def whatsapp_webhook(
-    From: str = Form(""),
-    Body: str = Form(""),
-    MediaUrl0: Optional[str] = Form(None),
-    MediaContentType0: Optional[str] = Form(None),
-    ProfileName: Optional[str] = Form(None)
-):
+async def whatsapp_webhook(data: WhatsAppWebhookRequest):
     """
     Webhook principal pour recevoir les messages WhatsApp via Twilio.
     Gère la conversation de manière interactive.
     """
     try:
+        # Extraire les données
+        From = data.From or ""
+        Body = data.Body or ""
+        MediaUrl0 = data.MediaUrl0
+        MediaContentType0 = data.MediaContentType0
+        ProfileName = data.ProfileName
+        
         # Nettoyer le numéro de téléphone
         phone = From.replace("whatsapp:", "").strip()
         message = Body.strip().lower()
