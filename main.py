@@ -292,7 +292,7 @@ class RIB(BaseModel):
 class FactureRequest(BaseModel):
     entreprise: Entreprise
     client: Client
-    prestations: List[Prestation]
+    prestations: Optional[List[Prestation]] = None  # Optionnel si prestations_json fourni
     tva_taux: float = 20.0
     numero_devis_origine: Optional[str] = None
     numero_facture: Optional[str] = None  # Numéro de facture fourni par le frontend
