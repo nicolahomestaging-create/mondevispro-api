@@ -2704,7 +2704,8 @@ def get_conversation(phone: str) -> Dict[str, Any]:
             "collected_data": {},
             "last_activity": datetime.now().isoformat(),
             "waiting_confirmation": False,
-            "pending_devis_data": None
+            "pending_devis_data": None,
+            "last_recap": ""  # Stocker le dernier recap
         }
     return whatsapp_conversations[phone]
 
@@ -2872,6 +2873,12 @@ def call_openai_assistant(phone: str, user_message: str) -> str:
         
         # Ajouter la reponse a l'historique
         conv["messages"].append({"role": "assistant", "content": assistant_response})
+        
+        # Si c'est un recap, le stocker pour la confirmation
+        if "recap" in assistant_response.lower() and ("ok" in assistant_response.lower() or "generer" in assistant_response.lower()):
+            conv["last_recap"] = assistant_response
+            conv["waiting_confirmation"] = True
+            print(f"RECAP STOCKE pour {phone}: {assistant_response[:100]}...")
         
         return assistant_response
         
@@ -3151,30 +3158,36 @@ async def whatsapp_webhook(
         confirmation_words = ["ok", "oui", "yes", "go", "genere", "valide", "parfait", "d'accord", "envoie", "lance", "confirme"]
         is_confirmation = message_lower.strip() in confirmation_words
         
-        print(f"DEBUG: message_lower = '{message_lower}', is_confirmation = {is_confirmation}")
+        # Utiliser le recap stocke OU chercher dans l'historique
+        last_recap = conv.get("last_recap", "")
+        waiting_for_confirmation = conv.get("waiting_confirmation", False)
         
-        # Verifier si le dernier message assistant contenait une demande de confirmation
-        last_assistant_msg = ""
-        if conv.get("messages"):
+        print(f"DEBUG: message='{message_lower}', is_confirm={is_confirmation}, waiting={waiting_for_confirmation}")
+        print(f"DEBUG: last_recap stocke: {last_recap[:100] if last_recap else 'VIDE'}...")
+        
+        # Si pas de recap stocke, chercher dans l'historique
+        if not last_recap and conv.get("messages"):
             for msg in reversed(conv["messages"]):
                 if msg.get("role") == "assistant":
-                    last_assistant_msg = msg.get("content", "").lower()
-                    print(f"DEBUG: Dernier message assistant: {last_assistant_msg[:100]}...")
-                    break
-        
-        # Chercher les indicateurs de recap
-        waiting_for_confirmation = any(x in last_assistant_msg for x in ["reponds ok", "pour generer", "dis moi ok", "recap du devis", "recap:"])
-        
-        print(f"DEBUG: waiting_for_confirmation = {waiting_for_confirmation}")
-        print(f"DEBUG: is_confirmation AND waiting = {is_confirmation and waiting_for_confirmation}")
+                    content = msg.get("content", "")
+                    if "recap" in content.lower():
+                        last_recap = content.lower()
+                        waiting_for_confirmation = True
+                        print(f"DEBUG: Recap trouve dans historique: {last_recap[:100]}...")
+                        break
         
         # Si c'est une confirmation apres un recap, GENERER LE JSON DIRECTEMENT (sans passer par l'IA)
-        if is_confirmation and waiting_for_confirmation:
+        if is_confirmation and (waiting_for_confirmation or last_recap):
             print(f"CONFIRMATION DETECTEE - Generation directe du JSON")
+            
+            # Remettre waiting_confirmation a False
+            conv["waiting_confirmation"] = False
+            conv["last_recap"] = ""
             
             # Extraire les donnees du recap avec regex
             import re
-            recap = last_assistant_msg
+            recap = last_recap if last_recap else ""
+            print(f"DEBUG: Extraction depuis recap: {recap[:200]}...")
             
             # Extraction des donnees
             client_nom = ""
