@@ -3164,7 +3164,17 @@ async def whatsapp_webhook(
         # Si c'est une confirmation apres un recap, modifier le message pour forcer la generation
         if is_confirmation and waiting_for_confirmation:
             print(f"CONFIRMATION DETECTEE - Forcer generation du devis")
-            original_message = "L'utilisateur confirme. GENERE LE JSON MAINTENANT avec toutes les donnees du recap precedent. Reponds UNIQUEMENT avec le JSON, rien d'autre."
+            # Ajouter le contexte du recap au message
+            original_message = f"""L'utilisateur a confirme avec "{original_message}". 
+
+INSTRUCTION CRITIQUE: Tu dois MAINTENANT generer le JSON du devis avec les donnees du recap que tu viens de faire.
+
+Voici le recap que tu as fait: {last_assistant_msg[:500]}
+
+REPONDS UNIQUEMENT AVEC LE JSON, FORMAT:
+{{"action": "generate_devis", "data": {{"client_nom": "...", "client_adresse": "...", "client_email": "...", "client_telephone": "...", "titre_projet": "...", "prestations": [{{"description": "...", "quantite": X, "unite": "...", "prix_unitaire": X}}], "remise_type": "pourcentage", "remise_valeur": X, "acompte_pourcentage": X, "delai": "..."}}}}
+
+REMPLACE ... par les VRAIES valeurs du recap. PAS DE TEXTE, JUSTE LE JSON!"""
         
         # Appeler l'assistant OpenAI
         assistant_response = call_openai_assistant(phone, original_message)
