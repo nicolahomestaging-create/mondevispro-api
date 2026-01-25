@@ -2854,35 +2854,11 @@ def format_whatsapp_buttons(buttons: List[Dict[str, str]]) -> str:
 
 def get_menu_principal() -> str:
     """Retourne le menu principal"""
-    return """👋 *Bienvenue sur MonDevisPro !*
-
-Que souhaitez-vous faire ?
-
-*1.* 📝 Créer un devis rapide (vocal/texte)
-*2.* 📋 Créer un devis complet (guidé)
-*3.* 🧾 Transformer un devis en facture
-*4.* 📂 Voir mes documents récents
-*5.* ❓ Aide
-
-_Répondez avec le numéro de votre choix_"""
+    return "Bienvenue sur MonDevisPro! 1=Devis rapide 2=Devis complet 3=Devis vers facture 4=Mes documents 5=Aide. Repondez avec le numero."
 
 def get_help_message() -> str:
     """Retourne le message d'aide"""
-    return """ℹ️ *Aide MonDevisPro*
-
-*Devis rapide :* Envoyez un message vocal ou texte décrivant votre devis. Exemple :
-_"Devis pour M. Dupont, carrelage 20m² à 45€/m², plomberie 500€"_
-
-*Devis complet :* Je vous guiderai étape par étape pour renseigner toutes les informations.
-
-*Transformer en facture :* Donnez-moi le numéro du devis et je le convertis en facture.
-
-*Commandes utiles :*
-• Tapez *menu* pour revenir au menu principal
-• Tapez *annuler* pour annuler l'opération en cours
-• Tapez *aide* pour afficher cette aide
-
-📞 Support : contact@mondevispro.fr"""
+    return "Aide MonDevisPro: Devis rapide=envoyez un message vocal ou texte. Devis complet=guide etape par etape. Commandes: menu, annuler, aide. Support: contact@mondevispro.fr"
 
 class WhatsAppWebhookRequest(BaseModel):
     """Requête webhook WhatsApp"""
@@ -2928,7 +2904,7 @@ async def whatsapp_webhook(data: WhatsAppWebhookRequest):
             session["state"] = ConversationState.MENU_PRINCIPAL
             session["data"] = {}
             session["prestations"] = []
-            return {"response": "❌ Opération annulée.\n\n" + get_menu_principal()}
+            return {"response": "Operation annulee. " + get_menu_principal()}
         
         if message in ["aide", "help", "?"]:
             return {"response": get_help_message()}
@@ -2940,50 +2916,21 @@ async def whatsapp_webhook(data: WhatsAppWebhookRequest):
         if state == ConversationState.MENU_PRINCIPAL:
             if message == "1":
                 session["state"] = ConversationState.DEVIS_SIMPLE_ATTENTE
-                return {"response": """📝 *Mode Devis Rapide*
-
-Envoyez-moi votre devis en un seul message (vocal ou texte).
-
-*Exemple :*
-_"Devis pour Monsieur Dupont, rénovation salle de bain : pose carrelage 15m² à 45€/m², pose sanitaires 800€ forfait, délai 2 semaines"_
-
-💡 Plus vous donnez de détails, plus le devis sera précis !
-
-_Tapez *menu* pour revenir au menu principal_"""}
+            return {"response": "Mode Devis Rapide. Envoyez votre devis en un message vocal ou texte. Exemple: Devis pour M. Dupont, carrelage 20m2 a 45 euros, plomberie 800 euros. Tapez menu pour revenir."}
             
             elif message == "2":
                 session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_NOM
                 session["data"] = {}
                 session["prestations"] = []
-                return {"response": """📋 *Mode Devis Complet*
-
-Je vais vous guider étape par étape.
-
-*Étape 1/8 - Client*
-Quel est le nom du client ?
-
-_Exemple : Monsieur Jean Dupont_"""}
+            return {"response": "Mode Devis Complet. Etape 1/8 - Quel est le nom du client? Exemple: Monsieur Jean Dupont"}
             
             elif message == "3":
                 session["state"] = ConversationState.FACTURE_NUMERO_DEVIS
-                return {"response": """🧾 *Transformer un Devis en Facture*
-
-Quel est le numéro du devis à transformer ?
-
-_Exemple : DEV-20250125-001_
-
-💡 Vous pouvez trouver ce numéro sur votre devis ou dans l'application."""}
+            return {"response": "Transformer Devis en Facture. Quel est le numero du devis? Exemple: DEV-20250125-001"}
             
             elif message == "4":
                 session["state"] = ConversationState.MES_DOCUMENTS
-                return {"response": """📂 *Vos Documents Récents*
-
-Cette fonctionnalité nécessite que vous soyez connecté à l'application.
-
-🔗 Consultez vos documents sur :
-https://mondevispro.fr/dashboard/documents
-
-_Tapez *menu* pour revenir au menu principal_"""}
+            return {"response": "Consultez vos documents sur https://mondevispro.fr/dashboard/documents - Tapez menu pour revenir."}
             
             elif message == "5":
                 return {"response": get_help_message()}
@@ -2993,7 +2940,7 @@ _Tapez *menu* pour revenir au menu principal_"""}
                 session["state"] = ConversationState.DEVIS_SIMPLE_ATTENTE
                 # Retourner les données pour traitement par Make.com
                 return {
-                    "response": "⏳ Je traite votre demande...",
+                    "response": "Je traite votre demande...",
                     "action": "process_devis_simple",
                     "message_content": original_message,
                     "phone": phone,
@@ -3004,7 +2951,7 @@ _Tapez *menu* pour revenir au menu principal_"""}
         elif state == ConversationState.DEVIS_SIMPLE_ATTENTE:
             # Retourner les données pour traitement par Make.com/OpenAI
             return {
-                "response": "⏳ Je génère votre devis...",
+                "response": "Je genere votre devis...",
                 "action": "process_devis_simple",
                 "message_content": original_message,
                 "phone": phone,
@@ -3017,45 +2964,25 @@ _Tapez *menu* pour revenir au menu principal_"""}
         elif state == ConversationState.DEVIS_COMPLET_CLIENT_NOM:
             session["data"]["client_nom"] = original_message
             session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_EMAIL
-            return {"response": f"""✅ Client : *{original_message}*
-
-*Étape 2/8 - Email*
-Quel est l'email du client ?
-
-_Tapez *passer* si vous ne l'avez pas_"""}
+            return {"response": f"Client: {original_message}. Etape 2/8 - Email du client? (tapez passer si vous ne l'avez pas)"}
         
         elif state == ConversationState.DEVIS_COMPLET_CLIENT_EMAIL:
             if message != "passer":
                 session["data"]["client_email"] = original_message
             session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_TEL
-            return {"response": f"""✅ Email : *{original_message if message != "passer" else "Non renseigné"}*
-
-*Étape 3/8 - Téléphone*
-Quel est le téléphone du client ?
-
-_Tapez *passer* si vous ne l'avez pas_"""}
+            return {"response": f"Email: {original_message if message != 'passer' else 'Non renseigne'}. Etape 3/8 - Telephone du client? (tapez passer si vous ne l'avez pas)"}
         
         elif state == ConversationState.DEVIS_COMPLET_CLIENT_TEL:
             if message != "passer":
                 session["data"]["client_telephone"] = original_message
             session["state"] = ConversationState.DEVIS_COMPLET_CLIENT_ADRESSE
-            return {"response": f"""✅ Téléphone : *{original_message if message != "passer" else "Non renseigné"}*
-
-*Étape 4/8 - Adresse*
-Quelle est l'adresse du client ?
-
-_Tapez *passer* si vous ne l'avez pas_"""}
+            return {"response": f"Telephone: {original_message if message != 'passer' else 'Non renseigne'}. Etape 4/8 - Adresse du client? (tapez passer si vous ne l'avez pas)"}
         
         elif state == ConversationState.DEVIS_COMPLET_CLIENT_ADRESSE:
             if message != "passer":
                 session["data"]["client_adresse"] = original_message
             session["state"] = ConversationState.DEVIS_COMPLET_TITRE_PROJET
-            return {"response": f"""✅ Adresse : *{original_message if message != "passer" else "Non renseigné"}*
-
-*Étape 5/8 - Projet*
-Quel est le titre du projet/chantier ?
-
-_Exemple : Rénovation salle de bain_"""}
+            return {"response": f"Adresse: {original_message if message != 'passer' else 'Non renseigne'}. Etape 5/8 - Titre du projet? Exemple: Renovation salle de bain"}
         
         elif state == ConversationState.DEVIS_COMPLET_TITRE_PROJET:
             session["data"]["titre_projet"] = original_message
@@ -3114,16 +3041,9 @@ _Exemple : Rénovation salle de bain_"""}
                     session["state"] = ConversationState.DEVIS_COMPLET_DELAI
                     remise_type = session["data"].get("remise_type", "pourcentage")
                     symbole = "%" if remise_type == "pourcentage" else "€"
-                    return {"response": f"""✅ Remise : *{remise_valeur}{symbole}*
-
-*Étape 8/8 - Délai*
-Quel est le délai de réalisation ?
-
-_Exemple : 2 semaines, ou tapez *passer*_"""}
+                    return {"response": f"Remise: {remise_valeur}{symbole}. Etape 8/8 - Delai de realisation? Exemple: 2 semaines (ou tapez passer)"}
                 except:
-                    return {"response": """❌ Valeur non valide. Entrez un nombre.
-
-_Exemple : 10_"""}
+                    return {"response": "Valeur non valide. Entrez un nombre. Exemple: 10"}
         
         elif state == ConversationState.DEVIS_COMPLET_DELAI:
             if message != "passer":
@@ -3147,36 +3067,9 @@ _Exemple : 10_"""}
             elif remise_type == "fixe" and remise_valeur > 0:
                 total_ht = total_ht - remise_valeur
             
-            recap = f"""📋 *RÉCAPITULATIF DU DEVIS*
-
-👤 *Client :* {data.get('client_nom', 'Non renseigné')}
-📧 Email : {data.get('client_email', 'Non renseigné')}
-📞 Tél : {data.get('client_telephone', 'Non renseigné')}
-📍 Adresse : {data.get('client_adresse', 'Non renseigné')}
-
-🏗️ *Projet :* {data.get('titre_projet', 'Non renseigné')}
-
-📦 *Prestations :*
-"""
-            for p in prestations:
-                ligne_total = p["quantite"] * p["prix_unitaire"]
-                recap += f"• {p['description']} : {p['quantite']} {p['unite']} × {p['prix_unitaire']}€ = {ligne_total:.2f}€\n"
-            
-            if remise_type:
-                symbole = "%" if remise_type == "pourcentage" else "€"
-                recap += f"\n🎁 *Remise :* {remise_valeur}{symbole}"
-            
-            recap += f"""
-
-💰 *Total HT : {total_ht:.2f}€*
-⏱️ *Délai :* {data.get('delai', 'À définir')}
-
-*Confirmer la génération du devis ?*
-
-*1.* ✅ Générer le devis
-*2.* ❌ Annuler
-
-_Répondez 1 ou 2_"""
+            # Construire le récapitulatif simple
+            prestations_txt = ", ".join([f"{p['description']} {p['quantite']}{p['unite']} {p['prix_unitaire']}E" for p in prestations])
+            recap = f"RECAPITULATIF: Client={data.get('client_nom', '?')}, Projet={data.get('titre_projet', '?')}, Prestations=[{prestations_txt}], Total={total_ht:.2f}E HT. Repondez 1 pour generer ou 2 pour annuler."
             
             return {"response": recap}
         
@@ -3204,7 +3097,7 @@ _Répondez 1 ou 2_"""
                 session["prestations"] = []
                 
                 return {
-                    "response": "⏳ Je génère votre devis complet...",
+                    "response": "Je genere votre devis complet...",
                     "action": "generate_devis_complet",
                     "devis_data": devis_data,
                     "phone": phone,
@@ -3214,7 +3107,7 @@ _Répondez 1 ou 2_"""
                 session["state"] = ConversationState.MENU_PRINCIPAL
                 session["data"] = {}
                 session["prestations"] = []
-                return {"response": "❌ Devis annulé.\n\n" + get_menu_principal()}
+                return {"response": "Devis annule. " + get_menu_principal()}
         
         # ========== FACTURE ==========
         elif state == ConversationState.FACTURE_NUMERO_DEVIS:
@@ -3223,18 +3116,7 @@ _Répondez 1 ou 2_"""
             session["data"]["numero_devis"] = numero_devis
             session["state"] = ConversationState.FACTURE_CONFIRMATION
             
-            return {"response": f"""🧾 *Transformer en Facture*
-
-Numéro de devis : *{numero_devis}*
-
-⚠️ Cette action va créer une facture à partir de ce devis.
-
-*Confirmer ?*
-
-*1.* ✅ Créer la facture
-*2.* ❌ Annuler
-
-_Répondez 1 ou 2_"""}
+            return {"response": f"Transformer devis {numero_devis} en facture? Repondez 1 pour confirmer ou 2 pour annuler."}
         
         elif state == ConversationState.FACTURE_CONFIRMATION:
             if message == "1":
@@ -3244,7 +3126,7 @@ _Répondez 1 ou 2_"""}
                 session["data"] = {}
                 
                 return {
-                    "response": "⏳ Je crée votre facture...",
+                    "response": "Je cree votre facture...",
                     "action": "convert_devis_to_facture",
                     "numero_devis": numero_devis,
                     "phone": phone,
@@ -3253,7 +3135,7 @@ _Répondez 1 ou 2_"""}
             else:
                 session["state"] = ConversationState.MENU_PRINCIPAL
                 session["data"] = {}
-                return {"response": "❌ Conversion annulée.\n\n" + get_menu_principal()}
+                return {"response": "Conversion annulee. " + get_menu_principal()}
         
         # État non géré - retour au menu
         else:
@@ -3262,7 +3144,7 @@ _Répondez 1 ou 2_"""}
     
     except Exception as e:
         print(f"❌ Erreur webhook WhatsApp: {e}")
-        return {"response": f"❌ Une erreur est survenue. Tapez *menu* pour recommencer.\n\nErreur: {str(e)[:100]}"}
+        return {"response": f"Erreur survenue. Tapez menu pour recommencer."}
 
 
 @app.get("/webhook/whatsapp/sessions")
