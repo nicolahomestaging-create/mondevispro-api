@@ -2766,15 +2766,10 @@ L'utilisateur dit: "facture acompte 30% du devis DEV-xxx" ou "acompte 30% DEV-xx
 Reponds avec:
 {"action": "generate_facture_acompte", "data": {"numero_devis": "DEV-xxx", "taux_acompte": 30}}
 
-POUR UNE FACTURE FINALE (solde restant apres acomptes):
-L'utilisateur dit: "facture finale du devis DEV-xxx" ou "facture solde DEV-xxx"
+POUR UNE FACTURE FINALE (solde restant apres acomptes, ou facture complete si pas d'acompte):
+L'utilisateur dit: "facture finale DEV-xxx" ou "facture du devis DEV-xxx" ou "transformer devis DEV-xxx en facture"
 Reponds avec:
 {"action": "generate_facture_finale", "data": {"numero_devis": "DEV-xxx"}}
-
-POUR TRANSFORMER UN DEVIS EN FACTURE COMPLETE (sans acompte):
-L'utilisateur dit: "facture du devis DEV-xxx" ou "transformer devis DEV-xxx en facture"
-Reponds avec:
-{"action": "generate_facture", "data": {"numero_devis": "DEV-xxx"}}
 
 EXEMPLES DE COMPREHENSION:
 - "carrelage 20m2 45e" = prestation: carrelage, 20, m2, 45
@@ -2915,7 +2910,7 @@ def parse_assistant_response(response: str) -> Dict[str, Any]:
     response_clean = response.strip()
     
     # Liste des actions valides
-    VALID_ACTIONS = ["generate_devis", "generate_facture", "generate_facture_acompte", "generate_facture_finale"]
+    VALID_ACTIONS = ["generate_devis", "generate_facture_acompte", "generate_facture_finale"]
     
     # Methode 1: Si la reponse est un JSON pur (commence par { et finit par })
     if response_clean.startswith("{") and response_clean.endswith("}"):
@@ -3049,17 +3044,6 @@ async def whatsapp_webhook(
             
             print(f"Response finale: {json.dumps(response_data, ensure_ascii=True)}")
             return response_data
-        
-        elif parsed["action"] == "generate_facture":
-            # Transformer un devis en facture complete
-            reset_conversation(phone)
-            numero = clean_string(parsed.get("data", {}).get("numero_devis", ""))
-            return {
-                "action": "generate_facture",
-                "numero_devis": numero,
-                "phone": clean_string(phone),
-                "profile_name": clean_string(ProfileName or "")
-            }
         
         elif parsed["action"] == "generate_facture_acompte":
             # Generer une facture d'acompte
