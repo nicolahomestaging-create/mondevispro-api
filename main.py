@@ -2761,8 +2761,20 @@ EXEMPLE CONCRET - Si l'utilisateur a dit:
 Tu dois repondre:
 {"action": "generate_devis", "data": {"client_nom": "Jean Dupont", "client_adresse": "12 rue de Paris", "client_email": "", "client_telephone": "", "titre_projet": "Devis carrelage", "prestations": [{"description": "carrelage", "quantite": 20, "unite": "m2", "prix_unitaire": 45}], "remise_type": null, "remise_valeur": 0, "acompte_pourcentage": 0, "delai": ""}}
 
-Pour une facture:
-{"action": "generate_facture", "data": {"numero_devis": "NUMERO_REEL_DU_DEVIS"}}
+POUR UNE FACTURE D'ACOMPTE (a partir d'un devis existant):
+L'utilisateur dit: "facture acompte 30% du devis DEV-xxx" ou "acompte 30% DEV-xxx"
+Reponds avec:
+{"action": "generate_facture_acompte", "data": {"numero_devis": "DEV-xxx", "taux_acompte": 30}}
+
+POUR UNE FACTURE FINALE (solde restant apres acomptes):
+L'utilisateur dit: "facture finale du devis DEV-xxx" ou "facture solde DEV-xxx"
+Reponds avec:
+{"action": "generate_facture_finale", "data": {"numero_devis": "DEV-xxx"}}
+
+POUR TRANSFORMER UN DEVIS EN FACTURE COMPLETE (sans acompte):
+L'utilisateur dit: "facture du devis DEV-xxx" ou "transformer devis DEV-xxx en facture"
+Reponds avec:
+{"action": "generate_facture", "data": {"numero_devis": "DEV-xxx"}}
 
 EXEMPLES DE COMPREHENSION:
 - "carrelage 20m2 45e" = prestation: carrelage, 20, m2, 45
@@ -2902,11 +2914,14 @@ def parse_assistant_response(response: str) -> Dict[str, Any]:
     # Nettoyer la reponse
     response_clean = response.strip()
     
+    # Liste des actions valides
+    VALID_ACTIONS = ["generate_devis", "generate_facture", "generate_facture_acompte", "generate_facture_finale"]
+    
     # Methode 1: Si la reponse est un JSON pur (commence par { et finit par })
     if response_clean.startswith("{") and response_clean.endswith("}"):
         try:
             data = json.loads(response_clean)
-            if "action" in data:
+            if "action" in data and data["action"] in VALID_ACTIONS:
                 print(f"[METHODE 1] Action trouvee: {data['action']}")
                 return data
         except json.JSONDecodeError as e:
@@ -3036,14 +3051,39 @@ async def whatsapp_webhook(
             return response_data
         
         elif parsed["action"] == "generate_facture":
-            # L'assistant a le numero de devis pour la facture
+            # Transformer un devis en facture complete
             reset_conversation(phone)
             numero = clean_string(parsed.get("data", {}).get("numero_devis", ""))
             return {
                 "action": "generate_facture",
                 "numero_devis": numero,
-                "phone": phone,
-                "profile_name": ProfileName
+                "phone": clean_string(phone),
+                "profile_name": clean_string(ProfileName or "")
+            }
+        
+        elif parsed["action"] == "generate_facture_acompte":
+            # Generer une facture d'acompte
+            reset_conversation(phone)
+            data = parsed.get("data", {})
+            numero = clean_string(data.get("numero_devis", ""))
+            taux = data.get("taux_acompte", 30)
+            return {
+                "action": "generate_facture_acompte",
+                "numero_devis": numero,
+                "taux_acompte": taux,
+                "phone": clean_string(phone),
+                "profile_name": clean_string(ProfileName or "")
+            }
+        
+        elif parsed["action"] == "generate_facture_finale":
+            # Generer une facture finale (solde)
+            reset_conversation(phone)
+            numero = clean_string(parsed.get("data", {}).get("numero_devis", ""))
+            return {
+                "action": "generate_facture_finale",
+                "numero_devis": numero,
+                "phone": clean_string(phone),
+                "profile_name": clean_string(ProfileName or "")
             }
         
         else:
