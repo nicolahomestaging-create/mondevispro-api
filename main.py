@@ -306,6 +306,7 @@ class FactureRequest(BaseModel):
     total_ttc: Optional[float] = None  # Total TTC pour factures d'acompte
     total_ht_devis: Optional[float] = None  # Total HT du devis (avec remise)
     total_ttc_devis: Optional[float] = None  # Total TTC du devis (avec remise)
+    prestations_json: Optional[str] = None  # Prestations comme string JSON encodée URL
     is_facture_acompte: Optional[bool] = False  # Flag pour factures d'acompte
     taux_acompte: Optional[float] = None  # Taux d'acompte en pourcentage
     acompte_ttc_deja_facture: Optional[float] = None  # Montant TTC des acomptes déjà versés
@@ -2548,6 +2549,24 @@ async def generer_facture_endpoint(data: FactureRequest):
             # Dernière vérification de sécurité
             numero_facture_recu = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
             print(f"⚠️ Numéro de facture vide après traitement, génération d'un numéro par défaut: '{numero_facture_recu}'")
+        
+        # Parser prestations_json si fourni (pour Make.com)
+        if getattr(data, 'prestations_json', None) and (not data.prestations or len(data.prestations) == 0):
+            try:
+                import json
+                from urllib.parse import unquote
+                json_str = unquote(data.prestations_json)
+                print(f"📋 Prestations JSON decodee: {json_str[:200]}...")
+                parsed = json.loads(json_str)
+                prestations_list = [Prestation(**p) for p in parsed]
+                # Mettre à jour data avec les nouvelles prestations
+                if hasattr(data, 'model_copy'):
+                    data = data.model_copy(update={'prestations': prestations_list})
+                else:
+                    data.prestations = prestations_list
+                print(f"✅ Prestations parsees depuis JSON string: {len(prestations_list)} lignes")
+            except Exception as e:
+                print(f"❌ Erreur parsing prestations_json: {e}")
         
         print(f"📄 Début génération facture pour client: {data.client.nom}")
         print(f"📊 Nombre de prestations: {len(data.prestations)}")
