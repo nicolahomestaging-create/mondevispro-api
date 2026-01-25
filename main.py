@@ -2713,6 +2713,123 @@ def reset_session(phone_number: str):
     if phone_number in whatsapp_sessions:
         del whatsapp_sessions[phone_number]
 
+def parse_prestation_naturelle(texte: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse une prestation décrite en langage naturel.
+    Comprend des formats comme:
+    - "pose carrelage 20m² à 45€"
+    - "plomberie 800€"
+    - "2h de main d'oeuvre à 50€/h"
+    - "fourniture carrelage 20m2 35 euros"
+    - "peinture 3 jours 250€/jour"
+    """
+    import re
+    
+    texte = texte.lower().strip()
+    
+    # Nettoyer le texte
+    texte = texte.replace("€", " euros ").replace("²", "2").replace("'", " ")
+    texte = re.sub(r'\s+', ' ', texte)
+    
+    # Patterns pour les prix
+    prix_patterns = [
+        r'(\d+(?:[.,]\d+)?)\s*euros?(?:\s*/\s*|\s*par\s*|\s*le\s*)?(\w+)?',  # 45 euros, 45€/m2
+        r'a\s*(\d+(?:[.,]\d+)?)\s*euros?',  # à 45 euros
+        r'(\d+(?:[.,]\d+)?)\s*e(?:ur)?(?:\s*/\s*|\s*par\s*)?(\w+)?',  # 45e, 45e/m2
+    ]
+    
+    # Patterns pour les quantités avec unités
+    quantite_patterns = [
+        r'(\d+(?:[.,]\d+)?)\s*(m2|m²|m3|ml|h|heure|heures|jour|jours|unite|unites|lot|lots|kg|piece|pieces)',
+        r'(\d+(?:[.,]\d+)?)\s*(metre|metres)\s*(carre|carres|lineaire|lineaires|cube|cubes)',
+    ]
+    
+    # Extraire le prix
+    prix = None
+    unite_prix = None
+    for pattern in prix_patterns:
+        match = re.search(pattern, texte)
+        if match:
+            prix = float(match.group(1).replace(',', '.'))
+            if len(match.groups()) > 1 and match.group(2):
+                unite_prix = match.group(2)
+            break
+    
+    if prix is None:
+        # Chercher juste un nombre qui pourrait être un prix
+        nombres = re.findall(r'(\d+(?:[.,]\d+)?)', texte)
+        if nombres:
+            # Prendre le plus grand nombre comme prix probable
+            prix = max(float(n.replace(',', '.')) for n in nombres)
+    
+    if prix is None:
+        return None
+    
+    # Extraire la quantité et l'unité
+    quantite = 1
+    unite = "forfait"
+    
+    for pattern in quantite_patterns:
+        match = re.search(pattern, texte)
+        if match:
+            quantite = float(match.group(1).replace(',', '.'))
+            unite_raw = match.group(2) if len(match.groups()) >= 2 else ""
+            
+            # Normaliser l'unité
+            if 'm2' in unite_raw or 'carre' in unite_raw:
+                unite = "m2"
+            elif 'm3' in unite_raw or 'cube' in unite_raw:
+                unite = "m3"
+            elif 'ml' in unite_raw or 'lineaire' in unite_raw:
+                unite = "ml"
+            elif 'h' in unite_raw or 'heure' in unite_raw:
+                unite = "heure"
+            elif 'jour' in unite_raw:
+                unite = "jour"
+            elif 'kg' in unite_raw:
+                unite = "kg"
+            elif 'lot' in unite_raw:
+                unite = "lot"
+            elif 'piece' in unite_raw or 'unite' in unite_raw:
+                unite = "unite"
+            else:
+                unite = unite_raw
+            break
+    
+    # Si prix par unité détecté, ajuster
+    if unite_prix and quantite == 1:
+        # Le prix est unitaire, on garde quantite = 1 et unite = forfait par défaut
+        # sauf si on a trouvé une quantité
+        pass
+    
+    # Extraire la description (tout ce qui n'est pas prix/quantité)
+    description = texte
+    # Enlever les patterns de prix et quantité
+    description = re.sub(r'\d+(?:[.,]\d+)?\s*euros?(?:\s*/\s*\w+)?', '', description)
+    description = re.sub(r'\d+(?:[.,]\d+)?\s*e(?:ur)?(?:\s*/\s*\w+)?', '', description)
+    description = re.sub(r'a\s+$', '', description)
+    description = re.sub(r'\d+(?:[.,]\d+)?\s*(?:m2|m3|ml|h|heure|heures|jour|jours|unite|unites|lot|lots|kg|piece|pieces)', '', description)
+    description = re.sub(r'\s+', ' ', description).strip()
+    
+    # Nettoyer la description
+    mots_vides = ['de', 'du', 'le', 'la', 'les', 'a', 'au', 'aux', 'par', 'pour', 'et', 'ou']
+    mots = description.split()
+    mots = [m for m in mots if m not in mots_vides or len(mots) <= 3]
+    description = ' '.join(mots).strip()
+    
+    if not description:
+        description = "Prestation"
+    
+    # Capitaliser la première lettre
+    description = description.capitalize()
+    
+    return {
+        "description": description,
+        "quantite": quantite,
+        "unite": unite,
+        "prix_unitaire": prix
+    }
+
 class WhatsAppMessage(BaseModel):
     """Message entrant WhatsApp (format Twilio)"""
     From: str  # Numéro de l'expéditeur (format: whatsapp:+33...)
@@ -2943,116 +3060,52 @@ _Exemple : Rénovation salle de bain_"""}
         elif state == ConversationState.DEVIS_COMPLET_TITRE_PROJET:
             session["data"]["titre_projet"] = original_message
             session["state"] = ConversationState.DEVIS_COMPLET_PRESTATIONS
-            return {"response": f"""✅ Projet : *{original_message}*
-
-*Étape 6/8 - Prestations*
-Décrivez votre première prestation avec le format :
-_Description, quantité, unité, prix unitaire_
-
-*Exemple :*
-_Pose carrelage, 20, m², 45_
-
-💡 Unités possibles : m², ml, unité, forfait, heure, jour, lot, kg"""}
+            return {"response": f"Projet enregistre: {original_message}. Etape 6/8 - Decrivez votre premiere prestation naturellement. Exemple: pose carrelage 20m2 a 45 euros ou plomberie 800 euros"}
         
         elif state == ConversationState.DEVIS_COMPLET_PRESTATIONS:
-            # Parser la prestation
-            try:
-                parts = [p.strip() for p in original_message.split(",")]
-                if len(parts) >= 4:
-                    prestation = {
-                        "description": parts[0],
-                        "quantite": float(parts[1].replace(",", ".")),
-                        "unite": parts[2],
-                        "prix_unitaire": float(parts[3].replace(",", ".").replace("€", "").strip())
-                    }
-                    session["prestations"].append(prestation)
-                    total_ligne = prestation["quantite"] * prestation["prix_unitaire"]
-                    
-                    session["state"] = ConversationState.DEVIS_COMPLET_AJOUT_PRESTATION
-                    
-                    # Résumé des prestations
-                    resume = "*Prestations ajoutées :*\n"
-                    total_ht = 0
-                    for i, p in enumerate(session["prestations"], 1):
-                        ligne_total = p["quantite"] * p["prix_unitaire"]
-                        total_ht += ligne_total
-                        resume += f"{i}. {p['description']} - {p['quantite']} {p['unite']} × {p['prix_unitaire']}€ = {ligne_total:.2f}€\n"
-                    resume += f"\n*Total HT : {total_ht:.2f}€*"
-                    
-                    return {"response": f"""✅ Prestation ajoutée : *{prestation['description']}* ({total_ligne:.2f}€)
-
-{resume}
-
-Souhaitez-vous ajouter une autre prestation ?
-
-*1.* ➕ Ajouter une prestation
-*2.* ✅ Continuer
-
-_Répondez 1 ou 2_"""}
-                else:
-                    return {"response": """❌ Format non reconnu.
-
-Utilisez le format : _Description, quantité, unité, prix_
-
-*Exemple :*
-_Pose carrelage, 20, m², 45_
-
-Réessayez :"""}
-            except Exception as e:
-                return {"response": f"""❌ Erreur de format.
-
-Utilisez le format : _Description, quantité, unité, prix_
-
-*Exemple :*
-_Pose carrelage, 20, m², 45_
-
-Réessayez :"""}
+            # Parser intelligent qui comprend le langage naturel
+            prestation = parse_prestation_naturelle(original_message)
+            
+            if prestation:
+                session["prestations"].append(prestation)
+                total_ligne = prestation["quantite"] * prestation["prix_unitaire"]
+                
+                session["state"] = ConversationState.DEVIS_COMPLET_AJOUT_PRESTATION
+                
+                # Résumé des prestations
+                total_ht = sum(p["quantite"] * p["prix_unitaire"] for p in session["prestations"])
+                nb_prestations = len(session["prestations"])
+                
+                return {
+                    "response": f"Prestation ajoutee: {prestation['description']} - {total_ligne:.2f}E. Total: {total_ht:.2f}E HT ({nb_prestations} prestation(s)). Repondez 1 pour ajouter une autre prestation ou 2 pour continuer."
+                }
+            else:
+                return {
+                    "response": "Je n'ai pas compris. Decrivez votre prestation naturellement. Exemple: pose carrelage 20m2 a 45 euros ou plomberie 800 euros forfait"
+                }
         
         elif state == ConversationState.DEVIS_COMPLET_AJOUT_PRESTATION:
             if message == "1":
                 session["state"] = ConversationState.DEVIS_COMPLET_PRESTATIONS
-                return {"response": """➕ *Nouvelle prestation*
-
-Décrivez la prestation avec le format :
-_Description, quantité, unité, prix unitaire_
-
-*Exemple :*
-_Fourniture carrelage, 20, m², 35_"""}
+                return {"response": "Decrivez votre nouvelle prestation. Exemple: fourniture carrelage 20m2 a 35 euros"}
             elif message == "2":
                 session["state"] = ConversationState.DEVIS_COMPLET_REMISE
-                return {"response": """*Étape 7/8 - Remise*
-
-Souhaitez-vous appliquer une remise ?
-
-*1.* Pas de remise
-*2.* Remise en pourcentage (%)
-*3.* Remise en euros (€)
-
-_Répondez 1, 2 ou 3_"""}
+                return {"response": "Etape 7/8 - Remise. Voulez-vous appliquer une remise? Repondez: 1 pour pas de remise, 2 pour remise en %, 3 pour remise en euros"}
             else:
                 # Traiter comme nouvelle prestation directement
                 session["state"] = ConversationState.DEVIS_COMPLET_PRESTATIONS
-                return {"response": "Entrez votre prestation au format: Description, quantité, unité, prix. Exemple: Pose carrelage, 20, m2, 45"}
+                return {"response": "Decrivez votre prestation naturellement. Exemple: pose carrelage 20m2 a 45 euros"}
         
         elif state == ConversationState.DEVIS_COMPLET_REMISE:
             if message == "1":
                 session["state"] = ConversationState.DEVIS_COMPLET_DELAI
-                return {"response": """✅ Pas de remise
-
-*Étape 8/8 - Délai*
-Quel est le délai de réalisation ?
-
-_Exemple : 2 semaines, ou tapez *passer*_"""}
+                return {"response": "OK pas de remise. Etape 8/8 - Quel est le delai de realisation? Exemple: 2 semaines (ou tapez passer)"}
             elif message == "2":
                 session["data"]["remise_type"] = "pourcentage"
-                return {"response": """Quel pourcentage de remise ?
-
-_Exemple : 10_"""}
+                return {"response": "Quel pourcentage de remise? Exemple: 10"}
             elif message == "3":
                 session["data"]["remise_type"] = "fixe"
-                return {"response": """Quel montant de remise en euros ?
-
-_Exemple : 50_"""}
+                return {"response": "Quel montant de remise en euros? Exemple: 50"}
             else:
                 # C'est la valeur de remise
                 try:
