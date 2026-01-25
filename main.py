@@ -4,7 +4,7 @@ Génère des devis et factures PDF + Word professionnels
 Version 3.0.0
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -2769,11 +2769,11 @@ _"Devis pour M. Dupont, carrelage 20m² à 45€/m², plomberie 500€"_
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(
-    From: str = "",
-    Body: str = "",
-    MediaUrl0: Optional[str] = None,
-    MediaContentType0: Optional[str] = None,
-    ProfileName: Optional[str] = None
+    From: str = Form(""),
+    Body: str = Form(""),
+    MediaUrl0: Optional[str] = Form(None),
+    MediaContentType0: Optional[str] = Form(None),
+    ProfileName: Optional[str] = Form(None)
 ):
     """
     Webhook principal pour recevoir les messages WhatsApp via Twilio.
