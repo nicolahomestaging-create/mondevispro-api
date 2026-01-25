@@ -2755,11 +2755,21 @@ def save_conversation(phone: str, conv: Dict[str, Any]):
     try:
         supabase = get_supabase_client()
         if supabase:
+            messages_to_save = conv.get("messages", [])[-20:]
+            last_recap_to_save = conv.get("last_recap", "") or ""
+            waiting_to_save = conv.get("waiting_confirmation", False)
+            
+            print(f"=== SAUVEGARDE CONVERSATION ===")
+            print(f"Phone: {phone}")
+            print(f"Messages count: {len(messages_to_save)}")
+            print(f"Last recap: {last_recap_to_save[:100] if last_recap_to_save else 'VIDE'}...")
+            print(f"Waiting confirmation: {waiting_to_save}")
+            
             data = {
                 "phone": phone,
-                "messages": conv.get("messages", [])[-20:],  # Garder les 20 derniers messages
-                "last_recap": conv.get("last_recap", ""),
-                "waiting_confirmation": conv.get("waiting_confirmation", False),
+                "messages": messages_to_save,
+                "last_recap": last_recap_to_save,
+                "waiting_confirmation": waiting_to_save,
                 "last_activity": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat()
             }
@@ -2769,10 +2779,16 @@ def save_conversation(phone: str, conv: Dict[str, Any]):
                 data, 
                 on_conflict="phone"
             ).execute()
-            print(f"Conversation sauvegardee pour {phone}")
+            
+            print(f"Resultat upsert: {result.data if result.data else 'Pas de data'}")
+            print(f"=== FIN SAUVEGARDE ===")
             return True
+        else:
+            print("ERREUR: Supabase client est None!")
     except Exception as e:
         print(f"Erreur sauvegarde Supabase: {e}")
+        import traceback
+        traceback.print_exc()
     return False
 
 def reset_conversation(phone: str):
@@ -3258,15 +3274,20 @@ async def whatsapp_webhook(
         # Si c'est une confirmation apres un recap, GENERER LE JSON DIRECTEMENT (sans passer par l'IA)
         if is_confirmation and (waiting_for_confirmation or last_recap):
             print(f"CONFIRMATION DETECTEE - Generation directe du JSON")
+            print(f"last_recap utilise: {last_recap[:200] if last_recap else 'VIDE'}...")
+            
+            # Garder une copie du recap avant de le reset
+            recap_for_extraction = last_recap
             
             # Remettre waiting_confirmation a False
             conv["waiting_confirmation"] = False
             conv["last_recap"] = ""
+            save_conversation(phone, conv)  # Sauvegarder le reset
             
             # Extraire les donnees du recap avec regex
             import re
-            recap = last_recap if last_recap else ""
-            print(f"DEBUG: Extraction depuis recap: {recap[:200]}...")
+            recap = recap_for_extraction if recap_for_extraction else last_recap
+            print(f"DEBUG: Extraction depuis recap: {recap[:200] if recap else 'VIDE'}...")
             
             # Extraction des donnees
             client_nom = ""
