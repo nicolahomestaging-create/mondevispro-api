@@ -2702,7 +2702,9 @@ def get_conversation(phone: str) -> Dict[str, Any]:
         whatsapp_conversations[phone] = {
             "messages": [],
             "collected_data": {},
-            "last_activity": datetime.now().isoformat()
+            "last_activity": datetime.now().isoformat(),
+            "waiting_confirmation": False,
+            "pending_devis_data": None
         }
     return whatsapp_conversations[phone]
 
@@ -3143,6 +3145,26 @@ async def whatsapp_webhook(
         if message_lower in ["annuler", "cancel", "stop", "reset", "recommencer"]:
             reset_conversation(phone)
             return {"response": "Conversation reinitialisee. Tapez menu pour commencer."}
+        
+        # Detecter si c'est une confirmation apres un recap
+        conv = get_conversation(phone)
+        confirmation_words = ["ok", "oui", "yes", "go", "genere", "valide", "parfait", "c'est bon", "d'accord", "envoie", "lance", "confirme", "yes"]
+        is_confirmation = message_lower.strip() in confirmation_words or message_lower.strip().replace("'", "") in ["cest bon", "daccord"]
+        
+        # Verifier si le dernier message assistant contenait une demande de confirmation
+        last_assistant_msg = ""
+        if conv["messages"]:
+            for msg in reversed(conv["messages"]):
+                if msg.get("role") == "assistant":
+                    last_assistant_msg = msg.get("content", "").lower()
+                    break
+        
+        waiting_for_confirmation = "reponds ok" in last_assistant_msg or "pour generer" in last_assistant_msg or "dis moi ok" in last_assistant_msg
+        
+        # Si c'est une confirmation apres un recap, modifier le message pour forcer la generation
+        if is_confirmation and waiting_for_confirmation:
+            print(f"CONFIRMATION DETECTEE - Forcer generation du devis")
+            original_message = "L'utilisateur confirme. GENERE LE JSON MAINTENANT avec toutes les donnees du recap precedent. Reponds UNIQUEMENT avec le JSON, rien d'autre."
         
         # Appeler l'assistant OpenAI
         assistant_response = call_openai_assistant(phone, original_message)
