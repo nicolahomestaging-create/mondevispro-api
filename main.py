@@ -2869,18 +2869,19 @@ class WhatsAppWebhookRequest(BaseModel):
     ProfileName: Optional[str] = None
 
 @app.post("/webhook/whatsapp")
-async def whatsapp_webhook(data: WhatsAppWebhookRequest):
+async def whatsapp_webhook(
+    From: str = Form(""),
+    Body: str = Form(""),
+    MediaUrl0: Optional[str] = Form(None),
+    MediaContentType0: Optional[str] = Form(None),
+    ProfileName: Optional[str] = Form(None)
+):
     """
     Webhook principal pour recevoir les messages WhatsApp via Twilio.
     Gère la conversation de manière interactive.
+    Accepte form-urlencoded.
     """
     try:
-        # Extraire les données
-        From = data.From or ""
-        Body = data.Body or ""
-        MediaUrl0 = data.MediaUrl0
-        MediaContentType0 = data.MediaContentType0
-        ProfileName = data.ProfileName
         
         # Nettoyer le numéro de téléphone
         phone = From.replace("whatsapp:", "").strip()
