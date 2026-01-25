@@ -3161,20 +3161,104 @@ async def whatsapp_webhook(
         
         waiting_for_confirmation = "reponds ok" in last_assistant_msg or "pour generer" in last_assistant_msg or "dis moi ok" in last_assistant_msg
         
-        # Si c'est une confirmation apres un recap, modifier le message pour forcer la generation
+        # Si c'est une confirmation apres un recap, GENERER LE JSON DIRECTEMENT (sans passer par l'IA)
         if is_confirmation and waiting_for_confirmation:
-            print(f"CONFIRMATION DETECTEE - Forcer generation du devis")
-            # Ajouter le contexte du recap au message
-            original_message = f"""L'utilisateur a confirme avec "{original_message}". 
-
-INSTRUCTION CRITIQUE: Tu dois MAINTENANT generer le JSON du devis avec les donnees du recap que tu viens de faire.
-
-Voici le recap que tu as fait: {last_assistant_msg[:500]}
-
-REPONDS UNIQUEMENT AVEC LE JSON, FORMAT:
-{{"action": "generate_devis", "data": {{"client_nom": "...", "client_adresse": "...", "client_email": "...", "client_telephone": "...", "titre_projet": "...", "prestations": [{{"description": "...", "quantite": X, "unite": "...", "prix_unitaire": X}}], "remise_type": "pourcentage", "remise_valeur": X, "acompte_pourcentage": X, "delai": "..."}}}}
-
-REMPLACE ... par les VRAIES valeurs du recap. PAS DE TEXTE, JUSTE LE JSON!"""
+            print(f"CONFIRMATION DETECTEE - Generation directe du JSON")
+            
+            # Extraire les donnees du recap avec regex
+            import re
+            recap = last_assistant_msg
+            
+            # Extraction des donnees
+            client_nom = ""
+            client_adresse = ""
+            client_email = ""
+            client_telephone = ""
+            titre_projet = ""
+            description = ""
+            quantite = 1
+            unite = "unite"
+            prix = 0
+            remise = 0
+            acompte = 0
+            delai = ""
+            
+            # Client
+            match = re.search(r'client[:\s]+([^-\n]+)', recap, re.IGNORECASE)
+            if match:
+                client_nom = match.group(1).strip()
+            
+            # Adresse
+            match = re.search(r'adresse[:\s]+([^-\n]+)', recap, re.IGNORECASE)
+            if match:
+                client_adresse = match.group(1).strip()
+            
+            # Email
+            match = re.search(r'email[:\s]+([^\s-]+@[^\s-]+)', recap, re.IGNORECASE)
+            if match:
+                client_email = match.group(1).strip()
+            
+            # Telephone
+            match = re.search(r'telephone[:\s]+([0-9\s\+]+)', recap, re.IGNORECASE)
+            if match:
+                client_telephone = match.group(1).strip()
+            
+            # Projet
+            match = re.search(r'projet[:\s]+([^-\n]+)', recap, re.IGNORECASE)
+            if match:
+                titre_projet = match.group(1).strip()
+            
+            # Prestations - format "carrelage 50 m2 x 45 euros"
+            match = re.search(r'prestations?[:\s]+(\w+)\s+(\d+)\s*(\w+)\s*x?\s*(\d+)', recap, re.IGNORECASE)
+            if match:
+                description = match.group(1).strip()
+                quantite = int(match.group(2))
+                unite = match.group(3).strip()
+                prix = int(match.group(4))
+            
+            # Remise
+            match = re.search(r'remise[:\s]+(\d+)', recap, re.IGNORECASE)
+            if match:
+                remise = int(match.group(1))
+            
+            # Acompte
+            match = re.search(r'acompte[:\s]+(\d+)', recap, re.IGNORECASE)
+            if match:
+                acompte = int(match.group(1))
+            
+            # Delai
+            match = re.search(r'delai[:\s]+([^-\n]+)', recap, re.IGNORECASE)
+            if match:
+                delai = match.group(1).strip()
+            
+            print(f"Donnees extraites: client={client_nom}, projet={titre_projet}, prestation={description} {quantite} {unite} {prix}")
+            
+            # Generer directement la reponse JSON
+            if client_nom and description:
+                reset_conversation(phone)
+                devis_data = {
+                    "client_nom": clean_string(client_nom),
+                    "client_adresse": clean_string(client_adresse),
+                    "client_email": clean_string(client_email),
+                    "client_telephone": clean_string(client_telephone),
+                    "titre_projet": clean_string(titre_projet) if titre_projet else f"Devis {description}",
+                    "prestations": [{"description": clean_string(description), "quantite": quantite, "unite": clean_string(unite), "prix_unitaire": prix}],
+                    "remise_type": "pourcentage" if remise > 0 else None,
+                    "remise_valeur": remise,
+                    "acompte_pourcentage": acompte,
+                    "delai": clean_string(delai)
+                }
+                
+                return {
+                    "action": "generate_devis",
+                    "devis_data": devis_data,
+                    "phone": clean_string(phone),
+                    "profile_name": clean_string(ProfileName or "")
+                }
+            else:
+                print(f"Extraction echouee - client_nom={client_nom}, description={description}")
+                # Fallback: demander a l'IA
+                original_message = "L'utilisateur confirme. Genere le JSON maintenant."
         
         # Appeler l'assistant OpenAI
         assistant_response = call_openai_assistant(phone, original_message)
