@@ -3279,18 +3279,22 @@ async def whatsapp_webhook(
         # Detecter si c'est une confirmation apres un recap
         conv = get_conversation(phone)
         
-        # Si un devis est en cours de generation, bloquer les doublons
-        if conv.get("devis_generating"):
-            print(f"DEVIS EN COURS DE GENERATION pour {phone} - retour action generate_devis")
-            # Retourner la meme action pour que Make.com route vers la generation
-            # Reconstruire le JSON depuis le recap stocke
-            last_recap = conv.get("last_recap", "")
-            if last_recap:
-                # Le devis est deja en cours, on regenere le meme JSON
-                return {"action": "generate_devis", "devis_data": {"pending": True}, "message": "Devis en cours de generation"}
-            else:
-                # Reset le flag si pas de recap
-                conv["devis_generating"] = False
+        # Si un devis a ete genere recemment (moins de 30 secondes), bloquer les doublons
+        devis_generated_at = conv.get("devis_generated_at")
+        if devis_generated_at:
+            try:
+                gen_time = datetime.fromisoformat(devis_generated_at.replace('Z', '+00:00').replace('+00:00', ''))
+                seconds_since = (datetime.now() - gen_time).total_seconds()
+                if seconds_since < 30:
+                    print(f"DEVIS DEJA GENERE il y a {seconds_since:.1f}s pour {phone} - SKIP")
+                    return {"skip": True, "response": "Devis deja genere"}
+                else:
+                    # Reset le flag apres 30 secondes
+                    conv["devis_generated_at"] = None
+                    save_conversation(phone, conv)
+            except Exception as e:
+                print(f"Erreur parsing devis_generated_at: {e}")
+                conv["devis_generated_at"] = None
                 save_conversation(phone, conv)
         
         confirmation_words = ["ok", "oui", "yes", "go", "genere", "valide", "parfait", "d'accord", "envoie", "lance", "confirme"]
@@ -3399,7 +3403,11 @@ async def whatsapp_webhook(
             
             # Generer directement la reponse JSON
             if client_nom and description:
-                reset_conversation(phone)
+                # NE PAS supprimer - marquer comme "devis genere" pour bloquer les doublons
+                conv["devis_generated_at"] = datetime.now().isoformat()
+                conv["last_recap"] = ""
+                conv["waiting_confirmation"] = False
+                save_conversation(phone, conv)
                 devis_data = {
                     "client_nom": clean_string(client_nom),
                     "client_adresse": clean_string(client_adresse),
