@@ -2831,25 +2831,43 @@ def clean_json_string(json_str: str) -> str:
 def parse_assistant_response(response: str) -> Dict[str, Any]:
     """Parse la reponse de l'assistant pour detecter les actions JSON"""
     
-    # Methode 1: Chercher un JSON complet avec "action" et "data"
+    print(f"Parsing response: {response[:100]}...")
+    
+    # Methode 1: Chercher un JSON complet avec "action"
     def extract_json(text):
-        start = text.find('{"action"')
-        if start == -1:
-            start = text.find('{ "action"')
+        # Chercher le debut du JSON
+        for pattern in ['{"action"', '{ "action"', '{"action" ']:
+            start = text.find(pattern)
+            if start != -1:
+                break
+        
         if start == -1:
             return None
         
         # Compter les accolades pour trouver la fin du JSON
         count = 0
         end = start
+        in_string = False
+        escape_next = False
+        
         for i, char in enumerate(text[start:], start):
-            if char == '{':
-                count += 1
-            elif char == '}':
-                count -= 1
-                if count == 0:
-                    end = i + 1
-                    break
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\':
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if not in_string:
+                if char == '{':
+                    count += 1
+                elif char == '}':
+                    count -= 1
+                    if count == 0:
+                        end = i + 1
+                        break
         
         if end > start:
             return text[start:end]
@@ -2857,29 +2875,30 @@ def parse_assistant_response(response: str) -> Dict[str, Any]:
     
     # Essayer d'extraire le JSON
     json_str = extract_json(response)
+    
     if json_str:
-        # Nettoyer le JSON
-        json_str = clean_json_string(json_str)
+        print(f"JSON extrait: {json_str[:100]}...")
         try:
             data = json.loads(json_str)
             if "action" in data and data["action"] in ["generate_devis", "generate_facture"]:
-                print(f"JSON detecte: {data['action']}")
+                print(f"Action detectee: {data['action']}")
                 return data
         except json.JSONDecodeError as e:
             print(f"Erreur parsing JSON: {e}")
-            print(f"JSON problematique: {json_str[:200]}...")
     
-    # Methode 2: Essayer de parser la reponse complete
+    # Methode 2: Essayer de parser la reponse complete si elle commence par {
     try:
-        cleaned = clean_json_string(response.strip())
-        if cleaned.startswith("{"):
-            data = json.loads(cleaned)
-            if "action" in data:
+        trimmed = response.strip()
+        if trimmed.startswith("{") and trimmed.endswith("}"):
+            data = json.loads(trimmed)
+            if "action" in data and data["action"] in ["generate_devis", "generate_facture"]:
+                print(f"Action detectee (methode 2): {data['action']}")
                 return data
     except:
         pass
     
     # Pas d'action detectee, retourner comme message texte
+    print("Aucune action detectee, retour message texte")
     return {"action": "reply", "message": response}
 
 
@@ -2910,8 +2929,12 @@ async def whatsapp_webhook(
         # Appeler l'assistant OpenAI
         assistant_response = call_openai_assistant(phone, original_message)
         
+        print(f"Reponse OpenAI: {assistant_response[:200]}...")
+        
         # Parser la reponse pour detecter les actions
         parsed = parse_assistant_response(assistant_response)
+        
+        print(f"Parsed action: {parsed.get('action')}")
         
         if parsed["action"] == "generate_devis":
             # L'assistant a collecte toutes les infos pour un devis
@@ -2921,8 +2944,10 @@ async def whatsapp_webhook(
             devis_data = parsed.get("data", {})
             devis_data = clean_devis_data(devis_data)
             
+            print(f"Devis data: {devis_data}")
+            
+            # Renvoyer action a la racine pour Make.com
             return {
-                "response": "Je genere votre devis...",
                 "action": "generate_devis",
                 "devis_data": devis_data,
                 "phone": phone,
@@ -2932,17 +2957,18 @@ async def whatsapp_webhook(
         elif parsed["action"] == "generate_facture":
             # L'assistant a le numero de devis pour la facture
             reset_conversation(phone)
+            numero = clean_string(parsed.get("data", {}).get("numero_devis", ""))
             return {
-                "response": "Je cree votre facture...",
                 "action": "generate_facture",
-                "numero_devis": parsed.get("data", {}).get("numero_devis", ""),
+                "numero_devis": numero,
                 "phone": phone,
                 "profile_name": ProfileName
             }
         
         else:
-            # Reponse textuelle normale
-            return {"response": parsed.get("message", assistant_response)}
+            # Reponse textuelle normale - PAS de champ action
+            message_clean = clean_string(parsed.get("message", assistant_response))
+            return {"response": message_clean}
     
     except Exception as e:
         print(f"Erreur webhook: {e}")
