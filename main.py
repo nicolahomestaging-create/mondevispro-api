@@ -2537,15 +2537,54 @@ async def generer_facture_endpoint(data: FactureRequest):
         
         # DEBUG: Vérifier les valeurs pour facture d'acompte
         is_facture_acompte = getattr(data, 'is_facture_acompte', False)
+        taux_acompte = getattr(data, 'taux_acompte', None)
         total_ttc_recu = getattr(data, 'total_ttc', None)
         total_ht_recu = getattr(data, 'total_ht', None)
         print(f"🔍 DEBUG FACTURE ACOMPTE:")
         print(f"   is_facture_acompte: {is_facture_acompte}")
+        print(f"   taux_acompte: {taux_acompte}")
         print(f"   total_ttc reçu: {total_ttc_recu} (type: {type(total_ttc_recu)})")
         print(f"   total_ht reçu: {total_ht_recu} (type: {type(total_ht_recu)})")
         if data.prestations and len(data.prestations) > 0:
             print(f"   prix_unitaire prestation: {data.prestations[0].prix_unitaire}")
             print(f"   quantite prestation: {data.prestations[0].quantite}")
+        
+        # ============================================================
+        # CALCUL AUTOMATIQUE DU MONTANT D'ACOMPTE SI taux_acompte fourni
+        # ============================================================
+        if is_facture_acompte and taux_acompte and taux_acompte > 0:
+            # Calculer le total HT à partir des prestations
+            tva_taux = getattr(data.entreprise, 'tva_taux', 20) or 20
+            total_ht_calcule = 0
+            for p in data.prestations:
+                total_ht_calcule += p.prix_unitaire * p.quantite
+            total_ttc_calcule = total_ht_calcule * (1 + tva_taux / 100)
+            
+            # Appliquer le taux d'acompte
+            total_ht_acompte = total_ht_calcule * taux_acompte / 100
+            total_ttc_acompte = total_ttc_calcule * taux_acompte / 100
+            
+            print(f"📊 CALCUL ACOMPTE:")
+            print(f"   Total HT devis: {total_ht_calcule}")
+            print(f"   Total TTC devis: {total_ttc_calcule}")
+            print(f"   Taux acompte: {taux_acompte}%")
+            print(f"   Total HT acompte: {total_ht_acompte}")
+            print(f"   Total TTC acompte: {total_ttc_acompte}")
+            
+            # Mettre à jour les totaux dans data
+            total_ttc_recu = total_ttc_acompte
+            total_ht_recu = total_ht_acompte
+            
+            # Mettre à jour l'objet data avec les montants d'acompte
+            try:
+                if hasattr(data, 'model_copy'):
+                    data = data.model_copy(update={'total_ttc': total_ttc_acompte, 'total_ht': total_ht_acompte})
+                else:
+                    data.total_ttc = total_ttc_acompte
+                    data.total_ht = total_ht_acompte
+                print(f"✅ Montants d'acompte appliqués: HT={total_ht_acompte}, TTC={total_ttc_acompte}")
+            except Exception as e:
+                print(f"⚠️ Erreur mise à jour montants acompte: {e}")
         
         # ============================================================
         # DÉTECTION AUTOMATIQUE DES FACTURES D'ACOMPTE
