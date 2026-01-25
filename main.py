@@ -272,7 +272,8 @@ class DevisDataFromAI(BaseModel):
     client_email: Optional[str] = ""
     client_telephone: Optional[str] = ""
     titre_projet: Optional[str] = ""
-    prestations: List[Prestation]
+    prestations: Optional[List[Prestation]] = None
+    prestations_json: Optional[str] = None  # Alternative: prestations comme string JSON
     delai: Optional[str] = "A definir"
     remise_type: Optional[str] = None
     remise_valeur: Optional[float] = 0
@@ -2453,6 +2454,21 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         client_telephone = getattr(data.devis_data, 'client_telephone', '') or ''
         acompte = getattr(data.devis_data, 'acompte_pourcentage', 0) or 0
         
+        # Gerer les prestations: soit liste directe, soit JSON string
+        prestations_list = data.devis_data.prestations
+        if not prestations_list and data.devis_data.prestations_json:
+            try:
+                import json
+                parsed = json.loads(data.devis_data.prestations_json)
+                prestations_list = [Prestation(**p) for p in parsed]
+                print(f"✅ Prestations parsees depuis JSON string: {len(prestations_list)} lignes")
+            except Exception as e:
+                print(f"❌ Erreur parsing prestations_json: {e}")
+                prestations_list = []
+        
+        if not prestations_list:
+            return {"success": False, "error": "Aucune prestation fournie"}
+        
         full_data = DevisRequest(
             entreprise=data.entreprise,
             client=Client(
@@ -2462,7 +2478,7 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
                 tel=client_telephone,
                 email=client_email
             ),
-            prestations=data.devis_data.prestations,
+            prestations=prestations_list,
             tva_taux=tva_taux,
             conditions_paiement=conditions,
             delai_realisation=data.devis_data.delai,
