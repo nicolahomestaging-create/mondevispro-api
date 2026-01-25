@@ -2783,9 +2783,11 @@ def call_openai_assistant(phone: str, user_message: str) -> str:
         print(f"Erreur OpenAI: {e}")
         return "Desole, erreur technique. Reessayez ou tapez menu."
 
-def clean_json_string(json_str: str) -> str:
-    """Nettoie une chaine JSON pour la rendre valide"""
-    # Remplacer les accents
+def clean_string(s: str) -> str:
+    """Nettoie une chaine de caracteres problematiques"""
+    if not isinstance(s, str):
+        return s
+    # Remplacer les accents et caracteres speciaux
     replacements = {
         'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
         'à': 'a', 'â': 'a', 'ä': 'a',
@@ -2804,10 +2806,27 @@ def clean_json_string(json_str: str) -> str:
         '\n': ' ',
         '\r': ' ',
         '\t': ' ',
+        '"': '',
+        "'": '',
     }
     for old, new in replacements.items():
-        json_str = json_str.replace(old, new)
-    return json_str
+        s = s.replace(old, new)
+    return s
+
+def clean_devis_data(data):
+    """Nettoie recursivement toutes les chaines dans un dictionnaire"""
+    if isinstance(data, dict):
+        return {k: clean_devis_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_devis_data(item) for item in data]
+    elif isinstance(data, str):
+        return clean_string(data)
+    else:
+        return data
+
+def clean_json_string(json_str: str) -> str:
+    """Nettoie une chaine JSON pour la rendre valide"""
+    return clean_string(json_str)
 
 def parse_assistant_response(response: str) -> Dict[str, Any]:
     """Parse la reponse de l'assistant pour detecter les actions JSON"""
@@ -2897,10 +2916,15 @@ async def whatsapp_webhook(
         if parsed["action"] == "generate_devis":
             # L'assistant a collecte toutes les infos pour un devis
             reset_conversation(phone)
+            
+            # Nettoyer les donnees pour eviter les erreurs JSON
+            devis_data = parsed.get("data", {})
+            devis_data = clean_devis_data(devis_data)
+            
             return {
                 "response": "Je genere votre devis...",
                 "action": "generate_devis",
-                "devis_data": parsed.get("data", {}),
+                "devis_data": devis_data,
                 "phone": phone,
                 "profile_name": ProfileName
             }
