@@ -3033,6 +3033,22 @@ EXEMPLES COMPREHENSION LANGAGE NATUREL:
 - "acompte 30%" -> acompte_pourcentage: 30
 - "livraison 2 semaines" -> delai: 2 semaines
 
+PLUSIEURS PRESTATIONS - TRES IMPORTANT:
+Quand l'utilisateur donne plusieurs prestations separees par des virgules, les capturer TOUTES dans le tableau prestations.
+
+Exemple: "carrelage 40m2 a 35 euros, peinture 80m2 a 18 euros, plomberie 1 forfait a 450 euros"
+-> prestations: [
+  {"description": "carrelage", "quantite": 40, "unite": "m2", "prix_unitaire": 35},
+  {"description": "peinture", "quantite": 80, "unite": "m2", "prix_unitaire": 18},
+  {"description": "plomberie", "quantite": 1, "unite": "forfait", "prix_unitaire": 450}
+]
+
+Dans le RECAP, liste CHAQUE prestation sur une ligne:
+- Prestations:
+  * carrelage 40 m2 x 35 euros = 1400 euros
+  * peinture 80 m2 x 18 euros = 1440 euros
+  * plomberie 1 forfait x 450 euros = 450 euros
+
 MENU D'AIDE:
 "MonDevisPro - Que puis-je faire pour vous?
 1. Creer un devis (donnez-moi les infos client et prestations)
