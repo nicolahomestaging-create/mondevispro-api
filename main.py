@@ -2696,6 +2696,9 @@ def get_openai_client():
 # Sessions avec historique de conversation (cache local + Supabase)
 whatsapp_conversations: Dict[str, Dict[str, Any]] = {}
 
+# Protection anti-doublon (phone -> dernier message + timestamp)
+last_processed_messages: Dict[str, Dict[str, Any]] = {}
+
 def get_supabase_client():
     """Recupere le client Supabase"""
     # Utiliser le client global deja configure
@@ -3217,6 +3220,21 @@ async def whatsapp_webhook(
     try:
         phone = From.replace("whatsapp:", "").strip()
         original_message = Body.strip()
+        
+        # Protection anti-doublon (Twilio/Make peut envoyer plusieurs fois)
+        current_time = datetime.now()
+        last_msg = last_processed_messages.get(phone, {})
+        if (last_msg.get("message") == original_message and 
+            last_msg.get("time") and 
+            (current_time - last_msg["time"]).total_seconds() < 10):
+            print(f"MESSAGE DOUBLON IGNORE pour {phone}: {original_message[:30]}...")
+            return {"response": ""}  # Ignorer le doublon silencieusement
+        
+        # Enregistrer ce message comme traite
+        last_processed_messages[phone] = {
+            "message": original_message,
+            "time": current_time
+        }
         
         print(f"WhatsApp de {phone}")
         print(f"  Body: {original_message[:50] if original_message else '(vide)'}...")
