@@ -3522,10 +3522,15 @@ async def whatsapp_webhook(
         
         if parsed["action"] == "generate_devis":
             # L'assistant a collecte toutes les infos pour un devis
-            reset_conversation(phone)
+            # NE PAS supprimer - marquer comme genere pour bloquer les doublons
+            devis_data = parsed.get("data", {})
+            conv["devis_generated_at"] = datetime.now().isoformat()
+            conv["devis_generated_data"] = devis_data
+            conv["last_recap"] = ""
+            conv["waiting_confirmation"] = False
+            save_conversation(phone, conv)
             
             # Nettoyer les donnees pour eviter les erreurs JSON
-            devis_data = parsed.get("data", {})
             devis_data = clean_devis_data(devis_data)
             
             # Valider que le JSON est correct
