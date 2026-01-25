@@ -2728,10 +2728,13 @@ COMPORTEMENT:
 - Si l'utilisateur dit "annuler" -> reinitialise
 
 QUAND TOUTES LES INFOS SONT COLLECTEES:
-Reponds UNIQUEMENT avec un JSON dans ce format exact (pas de texte avant/apres):
-{"action": "generate_devis", "data": {...toutes les donnees...}}
+1. Dis a l'utilisateur "Je genere votre devis, un instant..."
+2. Puis sur une NOUVELLE LIGNE, ecris UNIQUEMENT le JSON (rien d'autre):
+{"action": "generate_devis", "data": {"client_nom": "...", "client_adresse": "...", "client_email": "...", "client_telephone": "...", "titre_projet": "...", "prestations": [{"description": "...", "quantite": 1, "unite": "...", "prix_unitaire": 0}], "remise_type": "pourcentage ou fixe ou null", "remise_valeur": 0, "acompte_pourcentage": 0, "delai": "..."}}
 
-ou pour une facture:
+IMPORTANT: Ne dis JAMAIS "Voici le JSON" - ecris juste le JSON directement apres ton message.
+
+Pour une facture:
 {"action": "generate_facture", "data": {"numero_devis": "DEV-..."}}
 
 EXEMPLES DE COMPREHENSION:
@@ -2780,28 +2783,54 @@ def call_openai_assistant(phone: str, user_message: str) -> str:
         return "Desole, erreur technique. Reessayez ou tapez menu."
 
 def parse_assistant_response(response: str) -> Dict[str, Any]:
-    """Parse la reponse de l'assistant pour detecter les actions"""
-    # Chercher un JSON dans la reponse
+    """Parse la reponse de l'assistant pour detecter les actions JSON"""
+    
+    # Methode 1: Chercher un JSON complet avec "action" et "data"
+    # Utilise une approche de comptage d'accolades
+    def extract_json(text):
+        start = text.find('{"action"')
+        if start == -1:
+            start = text.find('{ "action"')
+        if start == -1:
+            return None
+        
+        # Compter les accolades pour trouver la fin du JSON
+        count = 0
+        end = start
+        for i, char in enumerate(text[start:], start):
+            if char == '{':
+                count += 1
+            elif char == '}':
+                count -= 1
+                if count == 0:
+                    end = i + 1
+                    break
+        
+        if end > start:
+            return text[start:end]
+        return None
+    
+    # Essayer d'extraire le JSON
+    json_str = extract_json(response)
+    if json_str:
+        try:
+            data = json.loads(json_str)
+            if "action" in data and data["action"] in ["generate_devis", "generate_facture"]:
+                print(f"JSON detecte: {data['action']}")
+                return data
+        except json.JSONDecodeError as e:
+            print(f"Erreur parsing JSON: {e}")
+    
+    # Methode 2: Essayer de parser la reponse complete
     try:
-        # Essayer de parser directement
         if response.strip().startswith("{"):
-            data = json.loads(response)
+            data = json.loads(response.strip())
             if "action" in data:
                 return data
     except:
         pass
     
-    # Chercher un JSON dans le texte
-    json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', response, re.DOTALL)
-    if json_match:
-        try:
-            data = json.loads(json_match.group())
-            if "action" in data:
-                return data
-        except:
-            pass
-    
-    # Pas d'action, juste du texte
+    # Pas d'action detectee, retourner comme message texte
     return {"action": "reply", "message": response}
 
 
