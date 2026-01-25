@@ -3228,7 +3228,7 @@ async def whatsapp_webhook(
             last_msg.get("time") and 
             (current_time - last_msg["time"]).total_seconds() < 10):
             print(f"MESSAGE DOUBLON IGNORE pour {phone}: {original_message[:30]}...")
-            return {"response": ""}  # Ignorer le doublon silencieusement
+            return {"skip": True, "response": "Message doublon ignore"}  # Make.com doit filtrer sur skip=true
         
         # Enregistrer ce message comme traite
         last_processed_messages[phone] = {
