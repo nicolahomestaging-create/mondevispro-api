@@ -2784,45 +2784,83 @@ def call_openai_assistant(phone: str, user_message: str) -> str:
         return "Desole, erreur technique. Reessayez ou tapez menu."
 
 def clean_string(s: str) -> str:
-    """Nettoie une chaine de caracteres problematiques"""
+    """Nettoie une chaine de caracteres problematiques - VERSION ULTRA STRICTE"""
     if not isinstance(s, str):
-        return s
+        return str(s) if s is not None else ""
+    
     # Remplacer les accents et caracteres speciaux
     replacements = {
         'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
         'à': 'a', 'â': 'a', 'ä': 'a',
         'ù': 'u', 'û': 'u', 'ü': 'u',
-        'ô': 'o', 'ö': 'o',
-        'î': 'i', 'ï': 'i',
+        'ô': 'o', 'ö': 'o', 'ò': 'o',
+        'î': 'i', 'ï': 'i', 'ì': 'i',
         'ç': 'c',
-        'É': 'E', 'È': 'E', 'Ê': 'E',
-        'À': 'A', 'Â': 'A',
-        'Ù': 'U', 'Û': 'U',
-        'Ô': 'O',
-        'Î': 'I',
+        'ñ': 'n',
+        'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E',
+        'À': 'A', 'Â': 'A', 'Ä': 'A',
+        'Ù': 'U', 'Û': 'U', 'Ü': 'U',
+        'Ô': 'O', 'Ö': 'O',
+        'Î': 'I', 'Ï': 'I',
         'Ç': 'C',
-        '€': 'euros',
+        'Ñ': 'N',
+        '€': ' euros',
         '²': '2',
+        '³': '3',
+        '°': ' degres',
         '\n': ' ',
         '\r': ' ',
         '\t': ' ',
         '"': '',
         "'": '',
+        '`': '',
+        '"': '',
+        '"': '',
+        ''': '',
+        ''': '',
+        '«': '',
+        '»': '',
+        '…': '...',
+        '–': '-',
+        '—': '-',
+        '\u00a0': ' ',  # Non-breaking space
+        '\u200b': '',   # Zero-width space
+        '\u2019': '',   # Right single quote
+        '\u2018': '',   # Left single quote
+        '\u201c': '',   # Left double quote
+        '\u201d': '',   # Right double quote
     }
     for old, new in replacements.items():
         s = s.replace(old, new)
-    return s
+    
+    # Supprimer tous les caracteres non-ASCII restants
+    s = ''.join(char if ord(char) < 128 else '' for char in s)
+    
+    # Supprimer les caracteres de controle
+    s = ''.join(char for char in s if ord(char) >= 32 or char in ' \t')
+    
+    # Supprimer les espaces multiples
+    while '  ' in s:
+        s = s.replace('  ', ' ')
+    
+    return s.strip()
 
 def clean_devis_data(data):
-    """Nettoie recursivement toutes les chaines dans un dictionnaire"""
+    """Nettoie recursivement toutes les chaines dans un dictionnaire - VERSION STRICTE"""
+    if data is None:
+        return ""
     if isinstance(data, dict):
-        return {k: clean_devis_data(v) for k, v in data.items()}
+        return {clean_string(str(k)): clean_devis_data(v) for k, v in data.items()}
     elif isinstance(data, list):
         return [clean_devis_data(item) for item in data]
     elif isinstance(data, str):
         return clean_string(data)
-    else:
+    elif isinstance(data, (int, float)):
         return data
+    elif isinstance(data, bool):
+        return data
+    else:
+        return clean_string(str(data))
 
 def clean_json_string(json_str: str) -> str:
     """Nettoie une chaine JSON pour la rendre valide"""
@@ -2950,15 +2988,26 @@ async def whatsapp_webhook(
             devis_data = parsed.get("data", {})
             devis_data = clean_devis_data(devis_data)
             
-            print(f"Devis data: {devis_data}")
+            # Valider que le JSON est correct
+            try:
+                test_json = json.dumps(devis_data, ensure_ascii=True)
+                devis_data = json.loads(test_json)
+            except Exception as e:
+                print(f"Erreur validation JSON: {e}")
+                devis_data = {"error": "Donnees invalides"}
+            
+            print(f"Devis data nettoye: {devis_data}")
             
             # Renvoyer action a la racine pour Make.com
-            return {
+            response_data = {
                 "action": "generate_devis",
                 "devis_data": devis_data,
-                "phone": phone,
-                "profile_name": ProfileName
+                "phone": clean_string(phone),
+                "profile_name": clean_string(ProfileName or "")
             }
+            
+            print(f"Response finale: {json.dumps(response_data, ensure_ascii=True)}")
+            return response_data
         
         elif parsed["action"] == "generate_facture":
             # L'assistant a le numero de devis pour la facture
