@@ -3148,18 +3148,25 @@ async def whatsapp_webhook(
         
         # Detecter si c'est une confirmation apres un recap
         conv = get_conversation(phone)
-        confirmation_words = ["ok", "oui", "yes", "go", "genere", "valide", "parfait", "c'est bon", "d'accord", "envoie", "lance", "confirme", "yes"]
-        is_confirmation = message_lower.strip() in confirmation_words or message_lower.strip().replace("'", "") in ["cest bon", "daccord"]
+        confirmation_words = ["ok", "oui", "yes", "go", "genere", "valide", "parfait", "d'accord", "envoie", "lance", "confirme"]
+        is_confirmation = message_lower.strip() in confirmation_words
+        
+        print(f"DEBUG: message_lower = '{message_lower}', is_confirmation = {is_confirmation}")
         
         # Verifier si le dernier message assistant contenait une demande de confirmation
         last_assistant_msg = ""
-        if conv["messages"]:
+        if conv.get("messages"):
             for msg in reversed(conv["messages"]):
                 if msg.get("role") == "assistant":
                     last_assistant_msg = msg.get("content", "").lower()
+                    print(f"DEBUG: Dernier message assistant: {last_assistant_msg[:100]}...")
                     break
         
-        waiting_for_confirmation = "reponds ok" in last_assistant_msg or "pour generer" in last_assistant_msg or "dis moi ok" in last_assistant_msg
+        # Chercher les indicateurs de recap
+        waiting_for_confirmation = any(x in last_assistant_msg for x in ["reponds ok", "pour generer", "dis moi ok", "recap du devis", "recap:"])
+        
+        print(f"DEBUG: waiting_for_confirmation = {waiting_for_confirmation}")
+        print(f"DEBUG: is_confirmation AND waiting = {is_confirmation and waiting_for_confirmation}")
         
         # Si c'est une confirmation apres un recap, GENERER LE JSON DIRECTEMENT (sans passer par l'IA)
         if is_confirmation and waiting_for_confirmation:
