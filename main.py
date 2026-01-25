@@ -3278,6 +3278,21 @@ async def whatsapp_webhook(
         
         # Detecter si c'est une confirmation apres un recap
         conv = get_conversation(phone)
+        
+        # Si un devis est en cours de generation, bloquer les doublons
+        if conv.get("devis_generating"):
+            print(f"DEVIS EN COURS DE GENERATION pour {phone} - retour action generate_devis")
+            # Retourner la meme action pour que Make.com route vers la generation
+            # Reconstruire le JSON depuis le recap stocke
+            last_recap = conv.get("last_recap", "")
+            if last_recap:
+                # Le devis est deja en cours, on regenere le meme JSON
+                return {"action": "generate_devis", "devis_data": {"pending": True}, "message": "Devis en cours de generation"}
+            else:
+                # Reset le flag si pas de recap
+                conv["devis_generating"] = False
+                save_conversation(phone, conv)
+        
         confirmation_words = ["ok", "oui", "yes", "go", "genere", "valide", "parfait", "d'accord", "envoie", "lance", "confirme"]
         is_confirmation = message_lower.strip() in confirmation_words
         
@@ -3307,10 +3322,11 @@ async def whatsapp_webhook(
             # Garder une copie du recap avant de le reset
             recap_for_extraction = last_recap
             
-            # Remettre waiting_confirmation a False
+            # Marquer comme "devis en generation" pour bloquer les doublons
+            conv["devis_generating"] = True
             conv["waiting_confirmation"] = False
-            conv["last_recap"] = ""
-            save_conversation(phone, conv)  # Sauvegarder le reset
+            # NE PAS effacer last_recap maintenant - on le garde pour les doublons
+            save_conversation(phone, conv)
             
             # Extraire les donnees du recap avec regex
             import re
