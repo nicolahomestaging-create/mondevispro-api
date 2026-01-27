@@ -203,14 +203,19 @@ def upload_to_supabase(filepath: str, filename: str) -> str:
 def get_entreprise_by_whatsapp(phone: str) -> Optional[Dict]:
     """
     Trouve l'entreprise liée à un numéro WhatsApp.
-    Le numéro peut être au format +33605108023 ou 33605108023
+    Le numéro peut être au format:
+    - whatsapp:+33605108023 (format Twilio)
+    - +33605108023
+    - 33605108023
     """
     if not supabase_client or not phone:
+        print(f"⚠️ get_entreprise_by_whatsapp: supabase_client={bool(supabase_client)}, phone={phone}")
         return None
     
     try:
-        # Normaliser le numéro (enlever le + si présent)
-        phone_normalized = phone.replace('+', '').strip()
+        # Normaliser le numéro (enlever whatsapp:, + et espaces)
+        phone_normalized = phone.replace('whatsapp:', '').replace('+', '').strip()
+        print(f"📱 Recherche entreprise pour WhatsApp: {phone} -> normalisé: {phone_normalized}")
         
         # Chercher l'entreprise par le champ whatsapp
         result = supabase_client.table('entreprises').select('*').eq('whatsapp', phone_normalized).execute()
