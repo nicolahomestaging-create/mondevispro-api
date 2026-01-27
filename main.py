@@ -198,6 +198,205 @@ def upload_to_supabase(filepath: str, filename: str) -> str:
         # Ne pas supprimer le fichier local en cas d'erreur
         return f"/download/{filename}"
 
+# ==================== FONCTIONS DASHBOARD SUPABASE ====================
+
+def get_entreprise_by_whatsapp(phone: str) -> Optional[Dict]:
+    """
+    Trouve l'entreprise liée à un numéro WhatsApp.
+    Le numéro peut être au format +33605108023 ou 33605108023
+    """
+    if not supabase_client or not phone:
+        return None
+    
+    try:
+        # Normaliser le numéro (enlever le + si présent)
+        phone_normalized = phone.replace('+', '').strip()
+        
+        # Chercher l'entreprise par le champ whatsapp
+        result = supabase_client.table('entreprises').select('*').eq('whatsapp', phone_normalized).execute()
+        
+        if result.data and len(result.data) > 0:
+            print(f"✅ Entreprise trouvée pour WhatsApp {phone_normalized}: {result.data[0].get('nom')}")
+            return result.data[0]
+        
+        # Essayer aussi avec le champ tel (si whatsapp non configuré)
+        result = supabase_client.table('entreprises').select('*').eq('tel', phone_normalized).execute()
+        
+        if result.data and len(result.data) > 0:
+            print(f"✅ Entreprise trouvée par tel {phone_normalized}: {result.data[0].get('nom')}")
+            return result.data[0]
+        
+        print(f"⚠️ Aucune entreprise trouvée pour le numéro {phone_normalized}")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Erreur recherche entreprise par WhatsApp: {e}")
+        return None
+
+
+def save_devis_to_dashboard(
+    entreprise_id: str,
+    numero_devis: str,
+    client_nom: str,
+    client_email: Optional[str],
+    client_telephone: Optional[str],
+    titre_projet: Optional[str],
+    prestations: List[Dict],
+    total_ht: float,
+    total_ttc: float,
+    pdf_url: Optional[str],
+    word_url: Optional[str],
+    remise_type: Optional[str] = None,
+    remise_value: Optional[float] = None,
+    delai: Optional[str] = None
+) -> Optional[Dict]:
+    """
+    Sauvegarde un devis dans la table dashboard (même table que le site web).
+    Retourne le devis créé ou None en cas d'erreur.
+    """
+    if not supabase_client or not entreprise_id:
+        print("⚠️ Supabase non configuré ou entreprise_id manquant, devis non sauvegardé en base")
+        return None
+    
+    try:
+        # Préparer les prestations au format JSON string (comme le dashboard)
+        prestations_json = json.dumps(prestations, ensure_ascii=False)
+        
+        devis_data = {
+            'entreprise_id': entreprise_id,
+            'numero_devis': numero_devis,
+            'client_nom': client_nom,
+            'client_email': client_email,
+            'telephone_client': client_telephone,
+            'titre_projet': titre_projet,
+            'prestations': prestations_json,
+            'total_ht': total_ht,
+            'total_ttc': total_ttc,
+            'statut': 'en_attente',
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'pdf_url': pdf_url,
+            'word_url': word_url,
+            'remise_type': remise_type,
+            'remise_value': remise_value if remise_type and remise_value else None,
+        }
+        
+        result = supabase_client.table('devis').insert(devis_data).execute()
+        
+        if result.data and len(result.data) > 0:
+            print(f"✅ Devis {numero_devis} sauvegardé dans dashboard (id: {result.data[0].get('id')})")
+            return result.data[0]
+        else:
+            print(f"⚠️ Devis inséré mais pas de données retournées")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Erreur sauvegarde devis dashboard: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def save_facture_to_dashboard(
+    entreprise_id: str,
+    devis_id: Optional[str],
+    numero_facture: str,
+    client_nom: str,
+    client_email: Optional[str],
+    client_telephone: Optional[str],
+    client_adresse: Optional[str],
+    titre_projet: Optional[str],
+    prestations: List[Dict],
+    total_ht: float,
+    total_ttc: float,
+    pdf_url: Optional[str],
+    word_url: Optional[str],
+    type_facture: str = 'complete',  # 'acompte' ou 'complete'
+    remise_type: Optional[str] = None,
+    remise_value: Optional[float] = None,
+    tva_taux: float = 20.0,
+    solde_a_payer: Optional[float] = None
+) -> Optional[Dict]:
+    """
+    Sauvegarde une facture dans la table dashboard (même table que le site web).
+    Retourne la facture créée ou None en cas d'erreur.
+    """
+    if not supabase_client or not entreprise_id:
+        print("⚠️ Supabase non configuré ou entreprise_id manquant, facture non sauvegardée en base")
+        return None
+    
+    try:
+        # Préparer les prestations au format JSON string
+        prestations_json = json.dumps(prestations, ensure_ascii=False)
+        
+        facture_data = {
+            'entreprise_id': entreprise_id,
+            'numero_facture': numero_facture,
+            'client_nom': client_nom,
+            'client_email': client_email,
+            'client_telephone': client_telephone,
+            'client_adresse': client_adresse,
+            'titre_projet': titre_projet,
+            'prestations': prestations_json,
+            'total_ht': total_ht,
+            'total_ttc': total_ttc,
+            'statut': 'en_attente',
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'pdf_url': pdf_url,
+            'word_url': word_url,
+            'type_facture': type_facture,
+            'remise_type': remise_type,
+            'remise_value': remise_value if remise_type and remise_value else None,
+            'tva_taux': tva_taux,
+            'solde_a_payer': solde_a_payer,
+        }
+        
+        # Ajouter devis_id si fourni
+        if devis_id:
+            facture_data['devis_id'] = devis_id
+        
+        result = supabase_client.table('factures').insert(facture_data).execute()
+        
+        if result.data and len(result.data) > 0:
+            print(f"✅ Facture {numero_facture} sauvegardée dans dashboard (id: {result.data[0].get('id')})")
+            return result.data[0]
+        else:
+            print(f"⚠️ Facture insérée mais pas de données retournées")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Erreur sauvegarde facture dashboard: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def get_devis_by_numero(numero_devis: str, entreprise_id: Optional[str] = None) -> Optional[Dict]:
+    """
+    Récupère un devis par son numéro.
+    """
+    if not supabase_client or not numero_devis:
+        return None
+    
+    try:
+        query = supabase_client.table('devis').select('*').eq('numero_devis', numero_devis)
+        
+        if entreprise_id:
+            query = query.eq('entreprise_id', entreprise_id)
+        
+        result = query.execute()
+        
+        if result.data and len(result.data) > 0:
+            print(f"✅ Devis {numero_devis} trouvé")
+            return result.data[0]
+        
+        print(f"⚠️ Devis {numero_devis} non trouvé")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Erreur recherche devis: {e}")
+        return None
+
+
 # Couleurs par défaut (utilisées si couleur_pdf n'est pas défini)
 COULEUR_DEFAUT = '#2F665B'
 BLEU_CLAIR = HexColor('#3498db')
@@ -283,6 +482,7 @@ class DevisRequestSimple(BaseModel):
     entreprise: Entreprise
     devis_data: DevisDataFromAI
     validite_jours: int = 30
+    phone: Optional[str] = None  # Numéro WhatsApp pour sauvegarde automatique dashboard
 
 class RIB(BaseModel):
     iban: Optional[str] = ""
@@ -312,6 +512,7 @@ class FactureRequest(BaseModel):
     acompte_ttc_deja_facture: Optional[float] = None  # Montant TTC des acomptes déjà versés
     acompte_references: Optional[List[str]] = None  # Numéros des factures d'acompte
     lignes_finales_devis: Optional[List[LigneFinale]] = None  # Lignes finales du devis figé (priorité sur prestations)
+    phone: Optional[str] = None  # Numéro WhatsApp pour sauvegarde automatique dashboard
 
 
 # ==================== FONCTIONS UTILITAIRES ====================
@@ -2507,6 +2708,49 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
         word_url = upload_to_supabase(new_word_path, f"{numero_devis}.docx")
         
+        # ============================================================
+        # SAUVEGARDE AUTOMATIQUE DANS LE DASHBOARD (si phone fourni)
+        # ============================================================
+        devis_dashboard_id = None
+        if data.phone:
+            print(f"📱 Phone fourni: {data.phone} - Recherche entreprise...")
+            entreprise = get_entreprise_by_whatsapp(data.phone)
+            if entreprise:
+                # Préparer les prestations pour le dashboard
+                prestations_for_db = []
+                for p in prestations_list:
+                    prestations_for_db.append({
+                        'description': p.description,
+                        'quantite': p.quantite,
+                        'unite': p.unite,
+                        'prix_unitaire_ht': p.prix_unitaire,
+                        'prix_unitaire': p.prix_unitaire,
+                        'tva_taux': p.tva_taux if p.tva_taux else tva_taux,
+                    })
+                
+                # Sauvegarder dans le dashboard
+                saved_devis = save_devis_to_dashboard(
+                    entreprise_id=entreprise['id'],
+                    numero_devis=numero_devis,
+                    client_nom=data.devis_data.client_nom,
+                    client_email=client_email,
+                    client_telephone=client_telephone,
+                    titre_projet=getattr(data.devis_data, 'titre_projet', None),
+                    prestations=prestations_for_db,
+                    total_ht=total_ht,
+                    total_ttc=total_ttc,
+                    pdf_url=pdf_url,
+                    word_url=word_url,
+                    remise_type=data.devis_data.remise_type,
+                    remise_value=data.devis_data.remise_valeur,
+                    delai=data.devis_data.delai
+                )
+                if saved_devis:
+                    devis_dashboard_id = saved_devis.get('id')
+                    print(f"✅ Devis sauvegardé dans dashboard avec ID: {devis_dashboard_id}")
+            else:
+                print(f"⚠️ Entreprise non trouvée pour {data.phone} - Devis non sauvegardé dans dashboard")
+        
         return {
             "success": True,
             "numero_devis": numero_devis,
@@ -2515,7 +2759,8 @@ async def generer_devis_simple_endpoint(data: DevisRequestSimple):
             "pdf_filename": f"{numero_devis}.pdf",
             "pdf_url": pdf_url,
             "word_filename": f"{numero_devis}.docx",
-            "word_url": word_url
+            "word_url": word_url,
+            "dashboard_id": devis_dashboard_id  # ID dans le dashboard (si sauvegardé)
         }
     except Exception as e:
         print(f"❌ Erreur dans generer_devis_simple_endpoint: {e}")
@@ -2711,6 +2956,65 @@ async def generer_facture_endpoint(data: FactureRequest):
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_facture_final}.pdf")
         word_url = upload_to_supabase(new_word_path, f"{numero_facture_final}.docx")
         
+        # ============================================================
+        # SAUVEGARDE AUTOMATIQUE DANS LE DASHBOARD (si phone fourni)
+        # ============================================================
+        facture_dashboard_id = None
+        devis_id_for_facture = None
+        
+        if getattr(data, 'phone', None):
+            print(f"📱 Phone fourni: {data.phone} - Recherche entreprise...")
+            entreprise = get_entreprise_by_whatsapp(data.phone)
+            if entreprise:
+                # Si numero_devis_origine fourni, trouver le devis dans le dashboard
+                if data.numero_devis_origine:
+                    devis_existant = get_devis_by_numero(data.numero_devis_origine, entreprise['id'])
+                    if devis_existant:
+                        devis_id_for_facture = devis_existant.get('id')
+                        print(f"✅ Devis trouvé: {devis_id_for_facture}")
+                
+                # Préparer les prestations pour le dashboard
+                prestations_for_db = []
+                if data.prestations:
+                    for p in data.prestations:
+                        prestations_for_db.append({
+                            'description': p.description,
+                            'quantite': p.quantite,
+                            'unite': p.unite,
+                            'prix_unitaire_ht': p.prix_unitaire,
+                            'prix_unitaire': p.prix_unitaire,
+                            'tva_taux': p.tva_taux if p.tva_taux else data.tva_taux,
+                        })
+                
+                # Déterminer le type de facture
+                type_facture = 'acompte' if is_facture_acompte else 'complete'
+                
+                # Sauvegarder dans le dashboard
+                saved_facture = save_facture_to_dashboard(
+                    entreprise_id=entreprise['id'],
+                    devis_id=devis_id_for_facture,
+                    numero_facture=numero_facture_final,
+                    client_nom=data.client.nom,
+                    client_email=data.client.email,
+                    client_telephone=data.client.tel,
+                    client_adresse=data.client.adresse,
+                    titre_projet=None,  # On pourrait le récupérer du devis
+                    prestations=prestations_for_db,
+                    total_ht=total_ht,
+                    total_ttc=total_ttc,
+                    pdf_url=pdf_url,
+                    word_url=word_url,
+                    type_facture=type_facture,
+                    remise_type=data.remise_type,
+                    remise_value=data.remise_valeur,
+                    tva_taux=data.tva_taux
+                )
+                if saved_facture:
+                    facture_dashboard_id = saved_facture.get('id')
+                    print(f"✅ Facture sauvegardée dans dashboard avec ID: {facture_dashboard_id}")
+            else:
+                print(f"⚠️ Entreprise non trouvée pour {data.phone} - Facture non sauvegardée dans dashboard")
+        
         return {
             "success": True,
             "numero_facture": numero_facture_final,
@@ -2719,7 +3023,9 @@ async def generer_facture_endpoint(data: FactureRequest):
             "pdf_filename": f"{numero_facture_final}.pdf",
             "pdf_url": pdf_url,
             "word_filename": f"{numero_facture_final}.docx",
-            "word_url": word_url
+            "word_url": word_url,
+            "dashboard_id": facture_dashboard_id,  # ID dans le dashboard (si sauvegardé)
+            "devis_id": devis_id_for_facture  # ID du devis lié (si trouvé)
         }
     except Exception as e:
         print(f"❌ Erreur dans generer_facture_endpoint: {e}")
