@@ -16,7 +16,8 @@ import re
 from datetime import datetime, timedelta
 import requests
 from io import BytesIO
-from openai import OpenAI
+from openai import OpenAI  # Gardé pour Whisper uniquement
+from anthropic import Anthropic  # Claude Sonnet pour le chat
 
 # PDF
 from reportlab.lib.pagesizes import A4
@@ -106,6 +107,31 @@ if SUPABASE_URL and SUPABASE_SERVICE_KEY:
         supabase_client = None
 else:
     print("❌ Supabase non configuré - variables d'environnement manquantes")
+
+# =============================================================================
+# CONFIGURATION ANTHROPIC (Claude Sonnet)
+# =============================================================================
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+anthropic_client = None
+if ANTHROPIC_API_KEY:
+    try:
+        anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        print("✅ Anthropic client (Claude Sonnet) configuré")
+    except Exception as e:
+        print(f"❌ Erreur configuration Anthropic: {e}")
+else:
+    print("⚠️ ANTHROPIC_API_KEY non configurée - Claude désactivé")
+
+# Garder OpenAI pour Whisper uniquement
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+openai_whisper_client = None
+if OPENAI_API_KEY:
+    try:
+        openai_whisper_client = OpenAI(api_key=OPENAI_API_KEY)
+        print("✅ OpenAI client (Whisper) configuré")
+    except Exception as e:
+        print(f"❌ Erreur configuration OpenAI: {e}")
 
 def upload_to_supabase(filepath: str, filename: str) -> str:
     """Upload un fichier sur Supabase Storage et retourne l'URL publique"""
@@ -3214,245 +3240,127 @@ def reset_conversation(phone: str):
         print(f"Erreur suppression Supabase: {e}")
 
 # Prompt systeme pour l'assistant
-ASSISTANT_SYSTEM_PROMPT = """Tu es MonDevisPro, assistant intelligent pour artisans et entrepreneurs sur WhatsApp.
+ASSISTANT_SYSTEM_PROMPT = """Tu es Vocario, assistant WhatsApp intelligent pour artisans et entrepreneurs.
 
-TON ROLE: Aider a creer des devis et factures professionnels de maniere simple et rapide.
+🎯 TON RÔLE:
+- Aider à créer des devis et factures rapidement
+- Être concis, professionnel et efficace
+- Guider avec des menus interactifs
 
-REGLES DE COMMUNICATION:
-- Sois chaleureux, professionnel et rassurant
-- Messages structures et lisibles (sauts de ligne)
-- Pas d'emojis, pas d'accents, pas de caracteres speciaux
-- Uniquement: lettres a-z A-Z, chiffres, ponctuation basique (. , ! ? - :)
-- Comprends le langage naturel meme avec fautes
+📱 TYPES DE RÉPONSES (TOUJOURS en JSON valide):
 
-MESSAGE D'ACCUEIL (quand "menu", "bonjour", "aide", "salut", "hello", ou premier message):
-"Bienvenue sur MonDevisPro!
+1️⃣ MENU PRINCIPAL (quand "menu", "bonjour", "salut", ou début):
+{"type": "menu", "body": "👋 Bienvenue sur Vocario!\\n\\nQue souhaitez-vous faire?", "buttons": [{"id": "new_devis", "title": "📝 Nouveau devis"}, {"id": "new_facture", "title": "🧾 Nouvelle facture"}, {"id": "mes_docs", "title": "📂 Mes documents"}]}
 
-Je suis votre assistant pour creer vos documents professionnels.
+2️⃣ MESSAGE TEXTE (pour conversations):
+{"type": "text", "message": "Votre message ici"}
 
-Que souhaitez-vous faire?
+3️⃣ CONFIRMATION DEVIS (après récap):
+{"type": "menu", "body": "📋 RÉCAP DU DEVIS\\n\\n- Client: [nom]\\n- Prestations: [détails]\\n- Total HT: [montant]€\\n\\nTout est correct?", "buttons": [{"id": "confirm_devis", "title": "✅ Confirmer"}, {"id": "modify_devis", "title": "✏️ Modifier"}, {"id": "cancel_devis", "title": "❌ Annuler"}]}
 
-1. DEVIS - Decrivez votre projet en une phrase
-   Exemple: Devis pour Martin, peinture 50m2 a 25 euros
+4️⃣ GÉNÉRATION DEVIS (après confirmation):
+{"type": "generate_devis", "data": {"client_nom": "...", "client_adresse": "...", "client_email": "...", "client_telephone": "...", "titre_projet": "...", "prestations": [{"description": "...", "quantite": 1, "unite": "...", "prix_unitaire": 0}], "remise_type": null, "remise_valeur": 0, "acompte_pourcentage": 0, "delai": ""}}
 
-2. FACTURE ACOMPTE - Tapez: acompte 30% DEV-xxx
+5️⃣ GÉNÉRATION FACTURE ACOMPTE:
+{"type": "generate_facture_acompte", "data": {"numero_devis": "DEV-...", "taux_acompte": 30}}
 
-3. FACTURE FINALE - Tapez: facture finale DEV-xxx
+6️⃣ GÉNÉRATION FACTURE FINALE:
+{"type": "generate_facture_finale", "data": {"numero_devis": "DEV-..."}}
 
-Je comprends le langage naturel, ecrivez simplement!"
+📋 COLLECTE D'INFORMATIONS POUR UN DEVIS:
+Obligatoires: client_nom, prestations (description, quantite, unite, prix_unitaire)
+Optionnels: client_adresse, client_email, client_telephone, titre_projet, remise, acompte, delai
 
-POUR CREER UN DEVIS:
-L'utilisateur peut tout donner en une phrase ou en plusieurs messages.
+🔄 FLUX:
+1. Menu principal
+2. Si "Nouveau devis" → Demander infos
+3. Une fois infos collectées → RÉCAP avec boutons confirmation
+4. Si confirmé → JSON type "generate_devis"
 
-Infos a collecter:
-- Nom du client (obligatoire)
-- Adresse, email, telephone (optionnel)
-- Titre du projet (obligatoire, unique)
-- Prestations: quoi, combien, a quel prix (obligatoire)
-- Remise en % (optionnel)
-- Acompte en % (optionnel)
-- Delai (optionnel)
+💡 COMPRÉHENSION:
+- "carrelage 20m2 45€" → description: carrelage, quantite: 20, unite: m2, prix_unitaire: 45
+- "remise 10%" → remise_type: pourcentage, remise_valeur: 10
+- "acompte 30%" → acompte_pourcentage: 30
 
-COMPORTEMENT INTELLIGENT:
-1. Analyse ce que l'utilisateur a donne
-2. Si il manque des infos obligatoires -> demande gentiment
-3. Si tout est la -> fais un RECAP clair et demande confirmation
-4. Apres confirmation -> genere le JSON
+⚠️ RÈGLES:
+1. TOUJOURS répondre en JSON valide
+2. Max 3 boutons par menu
+3. JAMAIS de placeholders - vraies valeurs uniquement
+4. Être concis (WhatsApp = mobile)
 
-QUAND TU FAIS LE RECAP (format obligatoire):
-"Parfait! Voici le recap de votre devis:
+🇫🇷 Réponds en français."""
 
-- Client: [nom]
-- Adresse: [adresse ou non renseignee]
-- Email: [email ou non renseigne]
-- Telephone: [tel ou non renseigne]
-- Projet: [titre]
-- Prestations: [description] [qte] [unite] x [prix] euros
-- Sous-total HT: [calcul] euros
-- Remise: [X]% soit [montant] euros
-- Total HT apres remise: [total] euros
-- Acompte demande: [X]%
-- Delai: [delai ou non renseigne]
 
-Tout est correct? Repondez OK pour generer le devis!"
-
-APRES GENERATION REUSSIE (quand l'utilisateur confirme):
-Le systeme genere automatiquement le devis.
-PAS BESOIN de dire "annuler" pour continuer.
-
-DETECTION DES INTENTIONS:
-1. Salutation/Menu -> Message d'accueil
-2. Infos client/projet -> Collecter pour devis
-3. "acompte X% DEV-xxx" -> Facture acompte
-4. "facture finale DEV-xxx" -> Facture finale
-5. Confirmation (ok, oui, go, valide, parfait) apres recap -> Generer JSON
-
-POUR UN DEVIS - INFOS A COLLECTER:
-- client_nom (OBLIGATOIRE)
-- client_adresse (optionnel)
-- client_email (optionnel)
-- client_telephone (optionnel)
-- titre_projet (OBLIGATOIRE - doit etre unique)
-- prestations (OBLIGATOIRE - description, quantite, unite, prix_unitaire)
-- remise_type: "pourcentage" ou "fixe" (optionnel)
-- remise_valeur: nombre (optionnel)
-- acompte_pourcentage: nombre entre 0 et 100 (optionnel)
-- delai: texte (optionnel)
-
-FLUX OBLIGATOIRE:
-Etape 1: Utilisateur donne les infos
-Etape 2: Tu fais un RECAP complet et tu demandes "Repondez OK pour generer!"
-Etape 3: Utilisateur confirme (ok, oui, go, etc.)
-Etape 4: Tu generes le JSON
-
-JAMAIS SAUTER L'ETAPE 2!
-
-REPONSE CONFIRMATION (avant de generer):
-Fais un recap CLAIR et LISIBLE avec des tirets:
-
-"Recap du devis:
-
-- Client: [nom]
-- Adresse: [adresse]
-- Email: [email]
-- Telephone: [tel]
-- Projet: [titre]
-- Prestations: [description] [qte] [unite] x [prix] euros
-- Total HT estime: [calcul] euros
-- Remise: [X]%
-- Acompte demande: [X]%
-- Delai: [delai]
-
-Reponds OK pour generer le devis!"
-
-QUAND L'UTILISATEUR CONFIRME (oui/ok/valide/go/parfait/c'est bon/genere):
-Reponds UNIQUEMENT avec le JSON en utilisant les VRAIES DONNEES de la conversation.
-
-EXEMPLE - Si la conversation contenait:
-- Client: Pierre
-- Adresse: Rue des fesses 83140
-- Email: vanloo.nicola@gmail.com
-- Tel: 0605108023
-- Projet: Renovation Didier
-- Prestation: carrelage 50m2 a 45 euros
-- Remise: 20%
-- Acompte: 30%
-
-Tu reponds EXACTEMENT:
-{"action": "generate_devis", "data": {"client_nom": "Pierre", "client_adresse": "Rue des fesses 83140", "client_email": "vanloo.nicola@gmail.com", "client_telephone": "0605108023", "titre_projet": "Renovation Didier", "prestations": [{"description": "carrelage", "quantite": 50, "unite": "m2", "prix_unitaire": 45}], "remise_type": "pourcentage", "remise_valeur": 20, "acompte_pourcentage": 30, "delai": ""}}
-
-REGLES ABSOLUES POUR LE JSON:
-- JAMAIS de placeholders (VALEUR_REELLE, NOMBRE, VALEUR, etc.)
-- JAMAIS de "..." 
-- Utilise EXACTEMENT les donnees que l'utilisateur a fournies
-- Les nombres sont sans guillemets: 50, 45, 20, 30
-- Les textes sont avec guillemets: "Pierre", "carrelage"
-- Si info manquante: "" pour texte, null pour remise_type, 0 pour nombres
-
-SUPER IMPORTANT - DETECTION DE CONFIRMATION:
-Quand l'utilisateur repond apres un recap avec UN de ces mots:
-- "ok"
-- "oui"  
-- "yes"
-- "go"
-- "genere"
-- "valide"
-- "parfait"
-- "c'est bon"
-- "d'accord"
-- "envoie"
-- "lance"
-
-Tu dois IMMEDIATEMENT repondre avec le JSON, RIEN D'AUTRE!
-PAS de menu, PAS de question, PAS de texte - JUSTE LE JSON!
-
-Si tu viens de faire un recap et l'utilisateur confirme -> JSON DIRECT
-
-FACTURE ACOMPTE (numero devis + pourcentage):
-{"action": "generate_facture_acompte", "data": {"numero_devis": "DEV-XXXXXXXX-XXXXX", "taux_acompte": 30}}
-
-FACTURE FINALE (numero devis seul):
-{"action": "generate_facture_finale", "data": {"numero_devis": "DEV-XXXXXXXX-XXXXX"}}
-
-EXEMPLES COMPREHENSION LANGAGE NATUREL:
-- "carrelage 20m2 45e" -> description: carrelage, quantite: 20, unite: m2, prix: 45
-- "peinture 3 pieces 200 euros piece" -> description: peinture, quantite: 3, unite: piece, prix: 200
-- "plomberie forfait 800" -> description: plomberie, quantite: 1, unite: forfait, prix: 800
-- "remise 10%" -> remise_type: pourcentage, remise_valeur: 10
-- "remise 50 euros" -> remise_type: fixe, remise_valeur: 50
-- "acompte 30%" -> acompte_pourcentage: 30
-- "livraison 2 semaines" -> delai: 2 semaines
-
-PLUSIEURS PRESTATIONS - TRES IMPORTANT:
-Quand l'utilisateur donne plusieurs prestations separees par des virgules, les capturer TOUTES dans le tableau prestations.
-
-Exemple: "carrelage 40m2 a 35 euros, peinture 80m2 a 18 euros, plomberie 1 forfait a 450 euros"
--> prestations: [
-  {"description": "carrelage", "quantite": 40, "unite": "m2", "prix_unitaire": 35},
-  {"description": "peinture", "quantite": 80, "unite": "m2", "prix_unitaire": 18},
-  {"description": "plomberie", "quantite": 1, "unite": "forfait", "prix_unitaire": 450}
-]
-
-Dans le RECAP, liste CHAQUE prestation sur une ligne:
-- Prestations:
-  * carrelage 40 m2 x 35 euros = 1400 euros
-  * peinture 80 m2 x 18 euros = 1440 euros
-  * plomberie 1 forfait x 450 euros = 450 euros
-
-MENU D'AIDE:
-"MonDevisPro - Que puis-je faire pour vous?
-1. Creer un devis (donnez-moi les infos client et prestations)
-2. Facture acompte (ex: acompte 30% DEV-xxx)
-3. Facture finale (ex: facture finale DEV-xxx)
-Tapez annuler pour recommencer."
-
-Sois professionnel, efficace et retiens le contexte!"""
-
-def call_openai_assistant(phone: str, user_message: str) -> str:
-    """Appelle OpenAI avec l'historique de conversation"""
-    client = get_openai_client()
-    if not client:
-        return "Erreur: OpenAI non configure. Contactez le support."
+def call_claude_assistant(phone: str, user_message: str) -> str:
+    """Appelle Claude Sonnet avec l'historique de conversation"""
+    if not anthropic_client:
+        return '{"type": "text", "message": "Erreur: Claude non configuré. Contactez le support."}'
     
     conv = get_conversation(phone)
     conv["last_activity"] = datetime.now().isoformat()
     
-    # Ajouter le message utilisateur a l'historique
+    # Ajouter le message utilisateur à l'historique
     conv["messages"].append({"role": "user", "content": user_message})
     
-    # Limiter l'historique a 20 messages pour eviter les couts
+    # Limiter l'historique à 20 messages
     messages_to_send = conv["messages"][-20:]
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": ASSISTANT_SYSTEM_PROMPT},
-                *messages_to_send
-            ],
-            max_tokens=500,
-            temperature=0.7
+        response = anthropic_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            system=ASSISTANT_SYSTEM_PROMPT,
+            messages=messages_to_send
         )
         
-        assistant_response = response.choices[0].message.content.strip()
+        assistant_response = response.content[0].text.strip()
         
-        # Ajouter la reponse a l'historique
+        # Ajouter la réponse à l'historique
         conv["messages"].append({"role": "assistant", "content": assistant_response})
         
-        # Si c'est un recap, le stocker pour la confirmation
-        if "recap" in assistant_response.lower() and ("ok" in assistant_response.lower() or "generer" in assistant_response.lower()):
-            conv["last_recap"] = assistant_response
-            conv["waiting_confirmation"] = True
-            print(f"RECAP STOCKE pour {phone}: {assistant_response[:100]}...")
+        # Détecter si c'est un récap (pour la confirmation)
+        try:
+            parsed = json.loads(assistant_response)
+            if parsed.get("type") == "menu" and "recap" in parsed.get("body", "").lower():
+                conv["last_recap"] = assistant_response
+                conv["waiting_confirmation"] = True
+                print(f"📝 RECAP détecté pour {phone}")
+        except:
+            pass
         
-        # SAUVEGARDER dans Supabase
+        # Sauvegarder la conversation
         save_conversation(phone, conv)
         
+        print(f"🤖 Claude response: {assistant_response[:200]}...")
         return assistant_response
         
     except Exception as e:
-        print(f"Erreur OpenAI: {e}")
-        return "Desole, erreur technique. Reessayez ou tapez menu."
+        print(f"❌ Erreur Claude: {e}")
+        import traceback
+        traceback.print_exc()
+        return '{"type": "text", "message": "Erreur technique. Réessayez ou tapez menu."}'
+
+
+# Fonction legacy pour Whisper (garde OpenAI pour l'audio)
+def get_openai_client():
+    """Recupere le client OpenAI pour Whisper"""
+    global openai_whisper_client
+    if openai_whisper_client:
+        return openai_whisper_client
+    
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        try:
+            openai_whisper_client = OpenAI(api_key=api_key)
+            return openai_whisper_client
+        except Exception as e:
+            print(f"Erreur OpenAI client: {e}")
+    return None
+
+
+def call_openai_assistant(phone: str, user_message: str) -> str:
+    """DEPRECATED - Utilise call_claude_assistant à la place"""
+    return call_claude_assistant(phone, user_message)
 
 def clean_string(s: str) -> str:
     """Nettoie une chaine de caracteres problematiques - VERSION ULTRA STRICTE"""
@@ -3536,6 +3444,66 @@ def clean_devis_data(data):
 def clean_json_string(json_str: str) -> str:
     """Nettoie une chaine JSON pour la rendre valide"""
     return clean_string(json_str)
+
+def parse_claude_response(response: str) -> Dict[str, Any]:
+    """Parse la réponse de Claude pour extraire le type et les données"""
+    
+    print(f"=== PARSING CLAUDE RESPONSE ===")
+    print(f"Response: {response[:300]}...")
+    
+    try:
+        # Essayer de parser le JSON directement
+        data = json.loads(response)
+        response_type = data.get("type", "text")
+        
+        print(f"✅ Type détecté: {response_type}")
+        
+        # Mapper les types vers les actions Make.com
+        if response_type == "generate_devis":
+            return {
+                "action": "generate_devis",
+                "devis_data": data.get("data", {}),
+            }
+        
+        elif response_type == "generate_facture_acompte":
+            return {
+                "action": "generate_facture_acompte",
+                "numero_devis": data.get("data", {}).get("numero_devis", ""),
+                "taux_acompte": data.get("data", {}).get("taux_acompte", 30),
+            }
+        
+        elif response_type == "generate_facture_finale":
+            return {
+                "action": "generate_facture_finale",
+                "numero_devis": data.get("data", {}).get("numero_devis", ""),
+            }
+        
+        elif response_type == "menu":
+            return {
+                "action": "send_menu",
+                "body": data.get("body", ""),
+                "buttons": data.get("buttons", []),
+            }
+        
+        elif response_type == "list":
+            return {
+                "action": "send_list",
+                "body": data.get("body", ""),
+                "button": data.get("button", "Options"),
+                "sections": data.get("sections", []),
+            }
+        
+        else:  # type == "text" ou autre
+            return {
+                "action": "send_text",
+                "response": data.get("message", response),
+            }
+            
+    except json.JSONDecodeError as e:
+        print(f"⚠️ JSON invalide, retour texte brut: {e}")
+        # Fallback: utiliser l'ancien parser
+        return parse_assistant_response(response)
+
 
 def parse_assistant_response(response: str) -> Dict[str, Any]:
     """Parse la reponse de l'assistant pour detecter les actions JSON"""
@@ -3930,13 +3898,13 @@ async def whatsapp_webhook(
                 # Fallback: demander a l'IA
                 original_message = "L'utilisateur confirme. Genere le JSON maintenant."
         
-        # Appeler l'assistant OpenAI
-        assistant_response = call_openai_assistant(phone, original_message)
+        # Appeler l'assistant Claude (Sonnet)
+        assistant_response = call_claude_assistant(phone, original_message)
         
-        print(f"Reponse OpenAI: {assistant_response[:200]}...")
+        print(f"Reponse Claude: {assistant_response[:200]}...")
         
         # Parser la reponse pour detecter les actions
-        parsed = parse_assistant_response(assistant_response)
+        parsed = parse_claude_response(assistant_response)
         
         print(f"Parsed action: {parsed.get('action')}")
         
@@ -4031,6 +3999,94 @@ async def delete_whatsapp_session(phone: str):
         del whatsapp_conversations[phone]
         return {"message": f"Session {phone} supprimee"}
     return {"message": f"Session {phone} non trouvee"}
+
+
+# =============================================================================
+# NOUVEAUX ENDPOINTS POUR MENU INTERACTIF WHATSAPP
+# =============================================================================
+
+@app.get("/api/whatsapp/devis/{phone}")
+async def get_devis_for_whatsapp(phone: str, limit: int = 5):
+    """Récupère les derniers devis d'un utilisateur pour WhatsApp"""
+    if not supabase_client:
+        return {"error": "Supabase non configuré", "devis": []}
+    
+    try:
+        # Normaliser le numéro
+        phone_normalized = phone.replace('whatsapp:', '').replace('+', '').strip()
+        
+        # Trouver l'entreprise
+        entreprise = get_entreprise_by_whatsapp(phone_normalized)
+        if not entreprise:
+            return {"error": "Entreprise non trouvée", "devis": []}
+        
+        # Récupérer les devis
+        result = supabase_client.table('devis')\
+            .select('id, numero_devis, client_nom, total_ttc, statut, date, titre_projet')\
+            .eq('entreprise_id', entreprise['id'])\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        devis_list = []
+        for d in result.data or []:
+            devis_list.append({
+                "id": d.get("id"),
+                "numero": d.get("numero_devis", "N/A"),
+                "client": d.get("client_nom", ""),
+                "projet": d.get("titre_projet", ""),
+                "total": f"{d.get('total_ttc', 0):.2f}€",
+                "statut": d.get("statut", "en_attente"),
+                "date": d.get("date", ""),
+            })
+        
+        return {"devis": devis_list, "count": len(devis_list)}
+        
+    except Exception as e:
+        print(f"❌ Erreur récupération devis: {e}")
+        return {"error": str(e), "devis": []}
+
+
+@app.get("/api/whatsapp/factures/{phone}")
+async def get_factures_for_whatsapp(phone: str, limit: int = 5):
+    """Récupère les dernières factures d'un utilisateur pour WhatsApp"""
+    if not supabase_client:
+        return {"error": "Supabase non configuré", "factures": []}
+    
+    try:
+        phone_normalized = phone.replace('whatsapp:', '').replace('+', '').strip()
+        
+        entreprise = get_entreprise_by_whatsapp(phone_normalized)
+        if not entreprise:
+            return {"error": "Entreprise non trouvée", "factures": []}
+        
+        result = supabase_client.table('factures')\
+            .select('id, numero_facture, client_nom, total_ttc, statut, date, type_facture')\
+            .eq('entreprise_id', entreprise['id'])\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        factures_list = []
+        for f in result.data or []:
+            type_label = "Acompte" if f.get("type_facture") == "acompte" else "Facture"
+            factures_list.append({
+                "id": f.get("id"),
+                "numero": f.get("numero_facture", "N/A"),
+                "client": f.get("client_nom", ""),
+                "total": f"{f.get('total_ttc', 0):.2f}€",
+                "type": type_label,
+                "statut": f.get("statut", "en_attente"),
+                "date": f.get("date", ""),
+            })
+        
+        return {"factures": factures_list, "count": len(factures_list)}
+        
+    except Exception as e:
+        print(f"❌ Erreur récupération factures: {e}")
+        return {"error": str(e), "factures": []}
 
 
 if __name__ == "__main__":
