@@ -3455,7 +3455,7 @@ def handle_whatsapp_v3(phone: str, message: str) -> Dict[str, Any]:
     # === COMMANDES GLOBALES ===
     if message in ["menu", "start", "reset", "recommencer"]:
         reset_wa_conversation(phone)
-        return {"type": "text", "body": MENU_PRINCIPAL}
+        return {"type": "text", "body": MENU_PRINCIPAL, "template": "HX66922d777c512200cad1d2622199645f"}
     
     if message in ["annuler", "cancel", "stop"]:
         reset_wa_conversation(phone)
@@ -3464,19 +3464,19 @@ def handle_whatsapp_v3(phone: str, message: str) -> Dict[str, Any]:
     # === ÉTAT: MENU ===
     if state == ConversationState.MENU:
         # Réponse par numéro
-        if message == "1":
+        if message == "1" or message == "nouveau devis":
             conv["state"] = ConversationState.DEVIS_ATTENTE_CLIENT
             conv["data"] = {}
             save_wa_conversation(phone, conv)
             return {"type": "text", "body": MSG_DEVIS_CLIENT}
         
-        if message == "2":
+        if message == "2" or message == "nouvelle facture":
             conv["state"] = ConversationState.FACTURE_CHOIX_DEVIS
             conv["data"] = {}
             save_wa_conversation(phone, conv)
             return {"type": "text", "body": MSG_FACTURE_DEVIS}
         
-        if message == "3":
+        if message == "3" or message == "mes documents":
             return {"type": "text", "body": MSG_DOCUMENTS}
         
         # Sinon, demander à l'IA de comprendre l'intention
@@ -3501,10 +3501,10 @@ def handle_whatsapp_v3(phone: str, message: str) -> Dict[str, Any]:
             return {"type": "text", "body": MSG_DOCUMENTS}
         
         if intent in ["salut", "aide"]:
-            return {"type": "text", "body": MENU_PRINCIPAL}
+            return {"type": "text", "body": MENU_PRINCIPAL, "template": "HX66922d777c512200cad1d2622199645f"}
         
-        # Intent non reconnu
-        return {"type": "text", "body": MENU_PRINCIPAL}
+        # Intent non reconnu → Menu avec boutons
+        return {"type": "text", "body": MENU_PRINCIPAL, "template": "HX66922d777c512200cad1d2622199645f"}
     
     # === ÉTAT: DEVIS - ATTENTE CLIENT ===
     elif state == ConversationState.DEVIS_ATTENTE_CLIENT:
@@ -3694,7 +3694,7 @@ def handle_whatsapp_v3(phone: str, message: str) -> Dict[str, Any]:
     
     # === ÉTAT INCONNU ===
     reset_wa_conversation(phone)
-    return {"type": "text", "body": MENU_PRINCIPAL}
+    return {"type": "text", "body": MENU_PRINCIPAL, "template": "HX66922d777c512200cad1d2622199645f"}
 
 
 def transcribe_audio_from_url(audio_url: str) -> str:
@@ -3748,6 +3748,7 @@ async def whatsapp_webhook(
     
     Retourne:
     - type="text" → Message texte simple
+    - type="text" + template → Message avec boutons (template WhatsApp)
     - type="generate_devis" → Déclenche génération devis
     - type="generate_facture" → Déclenche génération facture
     """
@@ -3762,7 +3763,7 @@ async def whatsapp_webhook(
         if msg_sid:
             if msg_sid in _processed_message_sids:
                 print(f"⏭️ Message doublon ignoré: {msg_sid}")
-                return {"type": "text", "body": "", "skip": True}
+                return {"type": "skip", "skip": True}
             _processed_message_sids[msg_sid] = datetime.now()
             # Nettoyage vieux messages
             old = [s for s, t in _processed_message_sids.items() if (datetime.now() - t).total_seconds() > 300]
@@ -3782,9 +3783,9 @@ async def whatsapp_webhook(
                     "phone": phone
                 }
         
-        # Pas de message
+        # Pas de message → Menu avec boutons
         if not message:
-            return {"type": "text", "body": MENU_PRINCIPAL, "phone": phone}
+            return {"type": "text", "body": MENU_PRINCIPAL, "phone": phone, "template": "HX66922d777c512200cad1d2622199645f"}
         
         # Traiter le message
         response = handle_whatsapp_v3(phone, message)
@@ -3794,7 +3795,7 @@ async def whatsapp_webhook(
         if ProfileName:
             response["profile_name"] = ProfileName
         
-        print(f"📤 Réponse: type={response.get('type')}, body={response.get('body', '')[:50]}...")
+        print(f"📤 Réponse: type={response.get('type')}, template={response.get('template', 'none')}")
         
         return response
         
