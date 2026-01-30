@@ -3110,22 +3110,19 @@ def debug_env():
     }
 
 
-# ==================== ASSISTANT IA WHATSAPP ====================
 # =============================================================================
-# NOUVEAU WEBHOOK WHATSAPP v2 - OPTIMISÉ
+# WEBHOOK WHATSAPP v3 - SIMPLE & EFFICACE
 # =============================================================================
 # 
-# INSTRUCTIONS D'INTÉGRATION:
-# 1. Dans ton main.py existant, trouve la section:
-#    "# ==================== ASSISTANT IA WHATSAPP ===================="
-# 2. Supprime TOUT depuis cette ligne jusqu'à la fin du fichier
-# 3. Colle ce code à la place
+# REMPLACE TOUT depuis la ligne:
+#   "# États de conversation" (environ ligne 3200)
+# JUSQU'À la fin du fichier
 #
 # AVANTAGES:
-# - IA appelée SEULEMENT pour parser texte libre (client, prestations)
-# - Menus/confirmations = messages pré-définis (gratuit + instantané)
-# - Coûts réduits de ~80%
-# - Flow guidé par étapes
+# - Claude Haiku = 10x moins cher que Sonnet
+# - IA comprend TOUT (pas de mots-clés stricts)
+# - Menus texte avec numéros (compatible tous téléphones)
+# - Intégré avec Supabase/Dashboard
 # =============================================================================
 
 # États de conversation
@@ -3140,80 +3137,155 @@ class ConversationState:
     FACTURE_CONFIRMATION = "facture_confirmation"
 
 
-# Prompts IA courts (réduire les coûts)
-PROMPT_PARSE_CLIENT = """Extrais les infos client. JSON uniquement.
+# Prompt IA pour comprendre l'intention (menu)
+PROMPT_INTENT = """Tu es l'assistant Vocario. Analyse ce message et retourne UNIQUEMENT un JSON.
+
+Message: {text}
+
+Retourne ce JSON (rien d'autre):
+{{"intent": "..."}}
+
+Intents possibles:
+- "nouveau_devis" = veut créer un devis
+- "nouvelle_facture" = veut créer une facture
+- "mes_documents" = veut voir ses documents
+- "aide" = besoin d'aide
+- "salut" = salutation simple
+- "autre" = autre chose
+
+Exemples:
+"bonjour" → {{"intent": "salut"}}
+"je veux faire un devis" → {{"intent": "nouveau_devis"}}
+"devis" → {{"intent": "nouveau_devis"}}
+"créer facture" → {{"intent": "nouvelle_facture"}}
+"facturer le client" → {{"intent": "nouvelle_facture"}}"""
+
+# Prompt pour parser les infos client
+PROMPT_PARSE_CLIENT = """Extrais les infos client de ce texte. Retourne UNIQUEMENT un JSON.
+
 Texte: {text}
-Format: {{"nom": "...", "adresse": "...", "email": "...", "telephone": "..."}}
-Si info manquante = "". Nom obligatoire."""
 
-PROMPT_PARSE_PRESTATIONS = """Extrais les prestations. JSON uniquement.
+Format:
+{{"nom": "...", "adresse": "...", "email": "...", "telephone": "...", "ville": "..."}}
+
+Règles:
+- nom = obligatoire (prénom + nom ou juste nom)
+- Si info manquante = ""
+- Nettoie les données (majuscules pour nom, format téléphone)
+
+Exemples:
+"M. Dupont 15 rue des lilas 0612345678" → {{"nom": "M. Dupont", "adresse": "15 rue des lilas", "email": "", "telephone": "0612345678", "ville": ""}}
+"client dupont" → {{"nom": "Dupont", "adresse": "", "email": "", "telephone": "", "ville": ""}}"""
+
+# Prompt pour parser les prestations
+PROMPT_PARSE_PRESTATIONS = """Extrais les prestations de ce texte. Retourne UNIQUEMENT un JSON.
+
 Texte: {text}
-Format: {{"prestations": [{{"description": "...", "quantite": 1, "unite": "u", "prix_unitaire": 0}}], "titre_projet": "..."}}
-Ex: "carrelage 30m2 50€" → description: "Carrelage", quantite: 30, unite: "m2", prix_unitaire: 50"""
+
+Format:
+{{"prestations": [{{"description": "...", "quantite": 1, "unite": "u", "prix_unitaire": 0}}], "titre_projet": "..."}}
+
+Règles:
+- Devine l'unité: m², m, h, u, etc.
+- Si pas de quantité = 1
+- Si pas de prix = 0
+- titre_projet = résumé court
+
+Exemples:
+"carrelage 30m2 50€" → {{"prestations": [{{"description": "Carrelage", "quantite": 30, "unite": "m²", "prix_unitaire": 50}}], "titre_projet": "Carrelage"}}
+"2 fenêtres à 450 euros pièce" → {{"prestations": [{{"description": "Fenêtre", "quantite": 2, "unite": "pièce", "prix_unitaire": 450}}], "titre_projet": "Fenêtres"}}
+"peinture salon 800€" → {{"prestations": [{{"description": "Peinture salon", "quantite": 1, "unite": "forfait", "prix_unitaire": 800}}], "titre_projet": "Peinture"}}"""
 
 
-# Messages pré-définis (gratuit)
-WHATSAPP_MESSAGES = {
-    "welcome": {
-        "type": "interactive",
-        "body": "👋 Bienvenue sur *Vocario* !\n\nQue souhaitez-vous faire ?",
-        "buttons": [
-            {"id": "new_devis", "title": "📝 Nouveau devis"},
-            {"id": "new_facture", "title": "🧾 Nouvelle facture"},
-            {"id": "mes_documents", "title": "📂 Mes documents"}
-        ]
-    },
-    "devis_ask_client": {
-        "type": "text",
-        "body": "📝 *Nouveau devis*\n\n*Étape 1/3* - Client\n\nEnvoyez les infos:\n• Nom (obligatoire)\n• Adresse, téléphone, email\n\n_Ex: M. Dupont, 15 rue des Lilas, 0612345678_"
-    },
-    "devis_ask_prestations": {
-        "type": "text",
-        "body": "✅ Client OK !\n\n*Étape 2/3* - Prestations\n\nDécrivez les travaux:\n\n_Ex: Carrelage 30m² à 50€_\n_Ex: 2 fenêtres PVC 450€/pièce_"
-    },
-    "devis_ask_options": {
-        "type": "interactive",
-        "body": "✅ Prestations OK !\n\n*Étape 3/3* - Options ?",
-        "buttons": [
-            {"id": "option_remise", "title": "💰 Remise"},
-            {"id": "option_acompte", "title": "📅 Acompte"},
-            {"id": "option_skip", "title": "➡️ Générer"}
-        ]
-    },
-    "devis_ask_remise": {
-        "type": "text",
-        "body": "💰 Pourcentage de remise ?\n\n_Ex: 10%_"
-    },
-    "devis_ask_acompte": {
-        "type": "text",
-        "body": "📅 Pourcentage d'acompte ?\n\n_Ex: 30%_"
-    },
-    "facture_choose_devis": {
-        "type": "text",
-        "body": "🧾 *Nouvelle facture*\n\nNuméro du devis ?\n\n_Ex: DEV-20240115-ABC123_"
-    },
-    "facture_choose_type": {
-        "type": "interactive",
-        "body": "🧾 Type de facture ?",
-        "buttons": [
-            {"id": "facture_acompte", "title": "📅 Acompte"},
-            {"id": "facture_finale", "title": "✅ Finale"},
-            {"id": "cancel", "title": "❌ Annuler"}
-        ]
-    },
-    "facture_ask_taux": {
-        "type": "text",
-        "body": "📅 Pourcentage d'acompte ?\n\n_Ex: 30%_"
-    },
-    "error_parse": {
-        "type": "text",
-        "body": "🤔 Je n'ai pas compris.\n\nReformulez ou tapez *menu*"
-    },
-    "cancelled": {
-        "type": "text",
-        "body": "❌ Annulé.\n\nTapez *menu* pour recommencer."
-    }
-}
+# Messages prédéfinis (texte simple, pas de JSON complexe)
+MENU_PRINCIPAL = """👋 *Bienvenue sur Vocario !*
+
+Que souhaitez-vous faire ?
+
+*1* - 📝 Nouveau devis
+*2* - 🧾 Nouvelle facture
+*3* - 📂 Mes documents
+
+_Tapez le numéro ou décrivez votre besoin._"""
+
+MSG_DEVIS_CLIENT = """📝 *Nouveau devis*
+
+*Étape 1/3* - Informations client
+
+Envoyez les infos du client :
+• Nom (obligatoire)
+• Adresse, téléphone, email (optionnel)
+
+_Exemple: M. Dupont, 15 rue des Lilas Paris, 0612345678_"""
+
+MSG_DEVIS_PRESTATIONS = """✅ *Client enregistré !*
+
+*Étape 2/3* - Prestations
+
+Décrivez les travaux avec les prix :
+
+_Exemples:_
+• _Carrelage 30m² à 50€/m²_
+• _2 fenêtres PVC à 450€ pièce_
+• _Peinture salon 800€ forfait_"""
+
+MSG_DEVIS_OPTIONS = """✅ *Prestations OK !*
+
+*Étape 3/3* - Options
+
+*1* - 💰 Ajouter une remise
+*2* - 📅 Demander un acompte
+*3* - ➡️ Générer le devis
+
+_Tapez le numéro de votre choix._"""
+
+MSG_ASK_REMISE = """💰 *Remise*
+
+Quel pourcentage de remise ?
+
+_Exemple: 10_"""
+
+MSG_ASK_ACOMPTE = """📅 *Acompte*
+
+Quel pourcentage d'acompte ?
+
+_Exemple: 30_"""
+
+MSG_FACTURE_DEVIS = """🧾 *Nouvelle facture*
+
+Quel est le numéro du devis ?
+
+_Exemple: DEV-20240115-ABC123_
+
+Ou tapez *liste* pour voir vos derniers devis."""
+
+MSG_FACTURE_TYPE = """🧾 *Type de facture*
+
+*1* - 📅 Facture d'acompte
+*2* - ✅ Facture finale (solde)
+*3* - ❌ Annuler
+
+_Tapez le numéro de votre choix._"""
+
+MSG_FACTURE_TAUX = """📅 *Facture d'acompte*
+
+Quel pourcentage d'acompte ?
+
+_Exemple: 30_"""
+
+MSG_CANCELLED = """❌ *Annulé*
+
+Tapez *menu* pour recommencer."""
+
+MSG_ERROR = """🤔 *Je n'ai pas compris*
+
+Reformulez ou tapez *menu* pour revenir au menu principal."""
+
+MSG_DOCUMENTS = """📂 *Mes documents*
+
+Fonction bientôt disponible !
+
+Tapez *menu* pour revenir au menu."""
 
 
 # Cache conversations
@@ -3222,6 +3294,7 @@ _processed_message_sids: Dict[str, datetime] = {}
 
 
 def normalize_phone(phone: str) -> str:
+    """Normalise le numéro de téléphone"""
     return phone.replace("whatsapp:", "").replace("+", "").replace(" ", "").strip()
 
 
@@ -3232,6 +3305,7 @@ def get_wa_conversation(phone: str) -> Dict:
     if phone in _whatsapp_conversations:
         return _whatsapp_conversations[phone]
     
+    # Chercher dans Supabase
     if supabase_client:
         try:
             result = supabase_client.table("whatsapp_conversations").select("*").eq("phone", phone).execute()
@@ -3247,12 +3321,14 @@ def get_wa_conversation(phone: str) -> Dict:
         except Exception as e:
             print(f"⚠️ Erreur lecture conv: {e}")
     
+    # Nouvelle conversation
     conv = {"phone": phone, "state": ConversationState.MENU, "data": {}}
     _whatsapp_conversations[phone] = conv
     return conv
 
 
 def save_wa_conversation(phone: str, conv: Dict):
+    """Sauvegarde la conversation"""
     phone = normalize_phone(phone)
     _whatsapp_conversations[phone] = conv
     
@@ -3269,6 +3345,7 @@ def save_wa_conversation(phone: str, conv: Dict):
 
 
 def reset_wa_conversation(phone: str):
+    """Reset la conversation"""
     phone = normalize_phone(phone)
     if phone in _whatsapp_conversations:
         del _whatsapp_conversations[phone]
@@ -3279,137 +3356,241 @@ def reset_wa_conversation(phone: str):
             pass
 
 
-def call_ai_for_parsing(prompt: str, text: str) -> Optional[Dict]:
-    """Appelle Claude UNIQUEMENT pour parser du texte"""
+def call_haiku(prompt: str, text: str) -> Optional[Dict]:
+    """Appelle Claude Haiku pour parser du texte - 10x moins cher que Sonnet"""
     if not anthropic_client:
+        print("❌ Anthropic client non configuré")
         return None
     
     try:
         response = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=400,
+            model="claude-3-5-haiku-20241022",  # Haiku = rapide et pas cher
+            max_tokens=500,
             messages=[{"role": "user", "content": prompt.format(text=text)}]
         )
         
         result = response.content[0].text.strip()
+        print(f"🤖 Haiku: {result[:100]}...")
         
+        # Nettoyer le JSON
         if "```" in result:
             result = re.sub(r'```json?\s*', '', result)
             result = re.sub(r'```\s*', '', result)
         
+        # Trouver le JSON dans la réponse
+        start = result.find('{')
+        end = result.rfind('}') + 1
+        if start != -1 and end > start:
+            result = result[start:end]
+        
         return json.loads(result)
     except Exception as e:
-        print(f"❌ Erreur IA parsing: {e}")
+        print(f"❌ Erreur Haiku: {e}")
         return None
 
 
-def extract_number_from_text(text: str) -> Optional[int]:
+def extract_number(text: str) -> Optional[int]:
+    """Extrait un nombre du texte"""
     match = re.search(r'(\d+)', text)
     return int(match.group(1)) if match else None
 
 
-def format_devis_recap_text(conv: Dict) -> str:
+def format_recap(conv: Dict) -> str:
+    """Formate le récapitulatif du devis"""
     data = conv.get("data", {})
     client = data.get("client", {})
     prestations = data.get("prestations", [])
     
     total_ht = sum(p.get("quantite", 1) * p.get("prix_unitaire", 0) for p in prestations)
-    remise = data.get("remise_pourcentage", 0)
+    remise = data.get("remise", 0)
     if remise:
         total_ht = total_ht * (1 - remise / 100)
     
-    lines = [
-        "📋 *RÉCAPITULATIF*\n",
-        f"👤 *Client:* {client.get('nom', 'N/A')}"
-    ]
+    lines = ["📋 *RÉCAPITULATIF*\n"]
+    lines.append(f"👤 *Client:* {client.get('nom', 'N/A')}")
     
     if client.get("adresse"):
         lines.append(f"📍 {client.get('adresse')}")
     if client.get("telephone"):
         lines.append(f"📞 {client.get('telephone')}")
+    if client.get("email"):
+        lines.append(f"📧 {client.get('email')}")
     
     lines.append("\n📝 *Prestations:*")
     for p in prestations:
-        line = f"• {p.get('description', 'Prestation')}"
-        if p.get("quantite", 1) != 1:
-            line += f" ({p.get('quantite')} {p.get('unite', 'u')})"
-        line += f" → {p.get('quantite', 1) * p.get('prix_unitaire', 0):.0f}€"
-        lines.append(line)
+        qty = p.get("quantite", 1)
+        prix = p.get("prix_unitaire", 0)
+        unite = p.get("unite", "u")
+        total_ligne = qty * prix
+        lines.append(f"• {p.get('description', 'Prestation')} ({qty} {unite}) → {total_ligne:.0f}€")
     
     lines.append(f"\n💰 *Total HT:* {total_ht:.2f}€")
     
     if remise:
-        lines.append(f"🏷️ Remise: -{remise}%")
+        lines.append(f"🏷️ *Remise:* -{remise}%")
     
-    acompte = data.get("acompte_pourcentage", 0)
+    acompte = data.get("acompte", 0)
     if acompte:
-        lines.append(f"📅 Acompte: {acompte}%")
+        lines.append(f"📅 *Acompte demandé:* {acompte}%")
+    
+    lines.append("\n*1* - ✅ Confirmer et générer")
+    lines.append("*2* - ✏️ Modifier")
+    lines.append("*3* - ❌ Annuler")
     
     return "\n".join(lines)
 
 
-def handle_whatsapp_v2(phone: str, message: str, button_id: Optional[str] = None) -> Dict[str, Any]:
-    """Gestionnaire principal WhatsApp v2"""
+def handle_whatsapp_v3(phone: str, message: str) -> Dict[str, Any]:
+    """Gestionnaire principal WhatsApp v3 - Simple et efficace"""
     phone = normalize_phone(phone)
-    message = (message or "").strip().lower()
+    message_original = (message or "").strip()
+    message = message_original.lower()
     
-    print(f"📱 [{phone}] Msg: '{message[:30]}...' | Btn: {button_id}")
+    print(f"📱 [{phone}] Message: '{message[:50]}...'")
     
     conv = get_wa_conversation(phone)
     state = conv.get("state", ConversationState.MENU)
     data = conv.get("data", {})
     
     # === COMMANDES GLOBALES ===
-    if message in ["menu", "bonjour", "salut", "hello", "start", "aide", "help"]:
+    if message in ["menu", "start", "reset", "recommencer"]:
         reset_wa_conversation(phone)
-        return WHATSAPP_MESSAGES["welcome"]
+        return {"type": "text", "body": MENU_PRINCIPAL}
     
-    if message in ["annuler", "cancel", "stop", "reset"]:
+    if message in ["annuler", "cancel", "stop"]:
         reset_wa_conversation(phone)
-        return WHATSAPP_MESSAGES["cancelled"]
+        return {"type": "text", "body": MSG_CANCELLED}
     
-    # === BOUTONS ===
-    if button_id:
-        if button_id == "new_devis":
+    # === ÉTAT: MENU ===
+    if state == ConversationState.MENU:
+        # Réponse par numéro
+        if message == "1":
             conv["state"] = ConversationState.DEVIS_ATTENTE_CLIENT
             conv["data"] = {}
             save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["devis_ask_client"]
+            return {"type": "text", "body": MSG_DEVIS_CLIENT}
         
-        elif button_id == "new_facture":
+        if message == "2":
             conv["state"] = ConversationState.FACTURE_CHOIX_DEVIS
             conv["data"] = {}
             save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["facture_choose_devis"]
+            return {"type": "text", "body": MSG_FACTURE_DEVIS}
         
-        elif button_id == "mes_documents":
-            return {"type": "text", "body": "📂 Fonction bientôt disponible !\n\nTapez *menu*"}
+        if message == "3":
+            return {"type": "text", "body": MSG_DOCUMENTS}
         
-        elif button_id == "option_remise":
+        # Sinon, demander à l'IA de comprendre l'intention
+        intent_result = call_haiku(PROMPT_INTENT, message_original)
+        intent = intent_result.get("intent", "autre") if intent_result else "autre"
+        
+        print(f"🎯 Intent détecté: {intent}")
+        
+        if intent == "nouveau_devis":
+            conv["state"] = ConversationState.DEVIS_ATTENTE_CLIENT
+            conv["data"] = {}
+            save_wa_conversation(phone, conv)
+            return {"type": "text", "body": MSG_DEVIS_CLIENT}
+        
+        if intent == "nouvelle_facture":
+            conv["state"] = ConversationState.FACTURE_CHOIX_DEVIS
+            conv["data"] = {}
+            save_wa_conversation(phone, conv)
+            return {"type": "text", "body": MSG_FACTURE_DEVIS}
+        
+        if intent == "mes_documents":
+            return {"type": "text", "body": MSG_DOCUMENTS}
+        
+        if intent in ["salut", "aide"]:
+            return {"type": "text", "body": MENU_PRINCIPAL}
+        
+        # Intent non reconnu
+        return {"type": "text", "body": MENU_PRINCIPAL}
+    
+    # === ÉTAT: DEVIS - ATTENTE CLIENT ===
+    elif state == ConversationState.DEVIS_ATTENTE_CLIENT:
+        parsed = call_haiku(PROMPT_PARSE_CLIENT, message_original)
+        
+        if not parsed or not parsed.get("nom"):
+            return {"type": "text", "body": "⚠️ Je n'ai pas trouvé le nom du client.\n\n_Exemple: M. Dupont, 15 rue des Lilas, 0612345678_"}
+        
+        data["client"] = parsed
+        conv["data"] = data
+        conv["state"] = ConversationState.DEVIS_ATTENTE_PRESTATIONS
+        save_wa_conversation(phone, conv)
+        
+        return {"type": "text", "body": MSG_DEVIS_PRESTATIONS}
+    
+    # === ÉTAT: DEVIS - ATTENTE PRESTATIONS ===
+    elif state == ConversationState.DEVIS_ATTENTE_PRESTATIONS:
+        parsed = call_haiku(PROMPT_PARSE_PRESTATIONS, message_original)
+        
+        if not parsed or not parsed.get("prestations"):
+            return {"type": "text", "body": "⚠️ Je n'ai pas compris les prestations.\n\n_Exemple: Carrelage 30m² à 50€/m²_"}
+        
+        # Vérifier qu'il y a au moins un prix
+        has_price = any(p.get("prix_unitaire", 0) > 0 for p in parsed["prestations"])
+        if not has_price:
+            return {"type": "text", "body": "⚠️ Précisez le prix SVP.\n\n_Exemple: Carrelage 30m² à 50€_"}
+        
+        data["prestations"] = parsed["prestations"]
+        data["titre_projet"] = parsed.get("titre_projet", "")
+        conv["data"] = data
+        conv["state"] = ConversationState.DEVIS_ATTENTE_OPTIONS
+        save_wa_conversation(phone, conv)
+        
+        return {"type": "text", "body": MSG_DEVIS_OPTIONS}
+    
+    # === ÉTAT: DEVIS - OPTIONS ===
+    elif state == ConversationState.DEVIS_ATTENTE_OPTIONS:
+        waiting = data.get("waiting_for")
+        
+        # Attente remise
+        if waiting == "remise":
+            num = extract_number(message)
+            if num and 0 < num <= 100:
+                data["remise"] = num
+                data["waiting_for"] = None
+                conv["data"] = data
+                save_wa_conversation(phone, conv)
+                return {"type": "text", "body": f"✅ Remise de {num}% ajoutée !\n\n" + MSG_DEVIS_OPTIONS}
+            return {"type": "text", "body": "⚠️ Entrez un pourcentage entre 1 et 100."}
+        
+        # Attente acompte
+        if waiting == "acompte":
+            num = extract_number(message)
+            if num and 0 < num <= 100:
+                data["acompte"] = num
+                data["waiting_for"] = None
+                conv["data"] = data
+                save_wa_conversation(phone, conv)
+                return {"type": "text", "body": f"✅ Acompte de {num}% ajouté !\n\n" + MSG_DEVIS_OPTIONS}
+            return {"type": "text", "body": "⚠️ Entrez un pourcentage entre 1 et 100."}
+        
+        # Choix option
+        if message == "1" or "remise" in message:
             data["waiting_for"] = "remise"
+            conv["data"] = data
             save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["devis_ask_remise"]
+            return {"type": "text", "body": MSG_ASK_REMISE}
         
-        elif button_id == "option_acompte":
+        if message == "2" or "acompte" in message:
             data["waiting_for"] = "acompte"
+            conv["data"] = data
             save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["devis_ask_acompte"]
+            return {"type": "text", "body": MSG_ASK_ACOMPTE}
         
-        elif button_id == "option_skip":
-            recap = format_devis_recap_text(conv)
+        if message == "3" or "generer" in message or "générer" in message or "valider" in message:
+            recap = format_recap(conv)
             conv["state"] = ConversationState.DEVIS_CONFIRMATION
             save_wa_conversation(phone, conv)
-            return {
-                "type": "interactive",
-                "body": recap + "\n\n_Correct ?_",
-                "buttons": [
-                    {"id": "confirm_devis", "title": "✅ Confirmer"},
-                    {"id": "modify_devis", "title": "✏️ Modifier"},
-                    {"id": "cancel", "title": "❌ Annuler"}
-                ]
-            }
+            return {"type": "text", "body": recap}
         
-        elif button_id == "confirm_devis":
+        return {"type": "text", "body": MSG_DEVIS_OPTIONS}
+    
+    # === ÉTAT: DEVIS - CONFIRMATION ===
+    elif state == ConversationState.DEVIS_CONFIRMATION:
+        if message == "1" or message in ["oui", "ok", "yes", "confirmer", "valider", "go", "parfait", "c'est bon"]:
+            # Générer le devis !
             client = data.get("client", {})
             prestations = data.get("prestations", [])
             
@@ -3420,10 +3601,10 @@ def handle_whatsapp_v2(phone: str, message: str, button_id: Optional[str] = None
                 "client_telephone": client.get("telephone", ""),
                 "titre_projet": data.get("titre_projet", f"Devis {client.get('nom', '')}"),
                 "prestations": prestations,
-                "remise_type": "pourcentage" if data.get("remise_pourcentage") else None,
-                "remise_valeur": data.get("remise_pourcentage", 0),
-                "acompte_pourcentage": data.get("acompte_pourcentage", 0),
-                "delai": data.get("delai", "")
+                "remise_type": "pourcentage" if data.get("remise") else None,
+                "remise_valeur": data.get("remise", 0),
+                "acompte_pourcentage": data.get("acompte", 0),
+                "delai": ""
             }
             
             reset_wa_conversation(phone)
@@ -3435,170 +3616,52 @@ def handle_whatsapp_v2(phone: str, message: str, button_id: Optional[str] = None
                 "phone": phone
             }
         
-        elif button_id == "modify_devis":
-            conv["state"] = ConversationState.DEVIS_ATTENTE_CLIENT
-            save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["devis_ask_client"]
-        
-        elif button_id == "cancel":
-            reset_wa_conversation(phone)
-            return WHATSAPP_MESSAGES["cancelled"]
-        
-        elif button_id == "facture_acompte":
-            data["type_facture"] = "acompte"
-            conv["state"] = ConversationState.FACTURE_CONFIRMATION
-            save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["facture_ask_taux"]
-        
-        elif button_id == "facture_finale":
-            numero_devis = data.get("numero_devis", "")
-            reset_wa_conversation(phone)
-            return {
-                "type": "generate_facture",
-                "action": "generate_facture_finale",
-                "numero_devis": numero_devis,
-                "phone": phone
-            }
-    
-    # === ÉTATS ===
-    
-    # Menu
-    if state == ConversationState.MENU:
-        if any(w in message for w in ["devis", "nouveau", "creer"]):
+        if message == "2" or message in ["modifier", "non", "changer"]:
             conv["state"] = ConversationState.DEVIS_ATTENTE_CLIENT
             conv["data"] = {}
             save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["devis_ask_client"]
+            return {"type": "text", "body": MSG_DEVIS_CLIENT}
         
-        if any(w in message for w in ["facture", "facturer"]):
-            conv["state"] = ConversationState.FACTURE_CHOIX_DEVIS
-            conv["data"] = {}
-            save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["facture_choose_devis"]
+        if message == "3" or message in ["annuler", "cancel"]:
+            reset_wa_conversation(phone)
+            return {"type": "text", "body": MSG_CANCELLED}
         
-        return WHATSAPP_MESSAGES["welcome"]
+        # Re-afficher le recap
+        recap = format_recap(conv)
+        return {"type": "text", "body": recap}
     
-    # Devis: Client
-    elif state == ConversationState.DEVIS_ATTENTE_CLIENT:
-        parsed = call_ai_for_parsing(PROMPT_PARSE_CLIENT, message)
-        
-        if not parsed or not parsed.get("nom"):
-            return WHATSAPP_MESSAGES["error_parse"]
-        
-        data["client"] = parsed
-        conv["state"] = ConversationState.DEVIS_ATTENTE_PRESTATIONS
-        save_wa_conversation(phone, conv)
-        return WHATSAPP_MESSAGES["devis_ask_prestations"]
-    
-    # Devis: Prestations
-    elif state == ConversationState.DEVIS_ATTENTE_PRESTATIONS:
-        parsed = call_ai_for_parsing(PROMPT_PARSE_PRESTATIONS, message)
-        
-        if not parsed or not parsed.get("prestations"):
-            return WHATSAPP_MESSAGES["error_parse"]
-        
-        has_price = any(p.get("prix_unitaire", 0) > 0 for p in parsed["prestations"])
-        if not has_price:
-            return {"type": "text", "body": "⚠️ Précisez le prix SVP\n\n_Ex: Carrelage 30m² à 50€_"}
-        
-        data["prestations"] = parsed["prestations"]
-        data["titre_projet"] = parsed.get("titre_projet", "")
-        conv["state"] = ConversationState.DEVIS_ATTENTE_OPTIONS
-        save_wa_conversation(phone, conv)
-        return WHATSAPP_MESSAGES["devis_ask_options"]
-    
-    # Devis: Options
-    elif state == ConversationState.DEVIS_ATTENTE_OPTIONS:
-        waiting = data.get("waiting_for")
-        
-        if waiting == "remise":
-            num = extract_number_from_text(message)
-            if num and 0 < num <= 100:
-                data["remise_pourcentage"] = num
-                data["waiting_for"] = None
-                save_wa_conversation(phone, conv)
-                return {
-                    "type": "interactive",
-                    "body": f"✅ Remise {num}% OK !",
-                    "buttons": [
-                        {"id": "option_acompte", "title": "📅 Acompte"},
-                        {"id": "option_skip", "title": "➡️ Générer"}
-                    ]
-                }
-            return {"type": "text", "body": "⚠️ % entre 1 et 100"}
-        
-        elif waiting == "acompte":
-            num = extract_number_from_text(message)
-            if num and 0 < num <= 100:
-                data["acompte_pourcentage"] = num
-                data["waiting_for"] = None
-                recap = format_devis_recap_text(conv)
-                conv["state"] = ConversationState.DEVIS_CONFIRMATION
-                save_wa_conversation(phone, conv)
-                return {
-                    "type": "interactive",
-                    "body": recap + "\n\n_Correct ?_",
-                    "buttons": [
-                        {"id": "confirm_devis", "title": "✅ Confirmer"},
-                        {"id": "modify_devis", "title": "✏️ Modifier"},
-                        {"id": "cancel", "title": "❌ Annuler"}
-                    ]
-                }
-            return {"type": "text", "body": "⚠️ % entre 1 et 100"}
-        
-        recap = format_devis_recap_text(conv)
-        conv["state"] = ConversationState.DEVIS_CONFIRMATION
-        save_wa_conversation(phone, conv)
-        return {
-            "type": "interactive",
-            "body": recap + "\n\n_Correct ?_",
-            "buttons": [
-                {"id": "confirm_devis", "title": "✅ Confirmer"},
-                {"id": "modify_devis", "title": "✏️ Modifier"},
-                {"id": "cancel", "title": "❌ Annuler"}
-            ]
-        }
-    
-    # Devis: Confirmation
-    elif state == ConversationState.DEVIS_CONFIRMATION:
-        if message in ["oui", "ok", "yes", "confirme", "valide", "go", "parfait"]:
-            return handle_whatsapp_v2(phone, "", button_id="confirm_devis")
-        
-        if message in ["non", "no", "modifier"]:
-            conv["state"] = ConversationState.DEVIS_ATTENTE_CLIENT
-            save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["devis_ask_client"]
-        
-        return {
-            "type": "interactive",
-            "body": "Confirmez ?",
-            "buttons": [
-                {"id": "confirm_devis", "title": "✅ Oui"},
-                {"id": "modify_devis", "title": "✏️ Modifier"},
-                {"id": "cancel", "title": "❌ Annuler"}
-            ]
-        }
-    
-    # Facture: Choix devis
+    # === ÉTAT: FACTURE - CHOIX DEVIS ===
     elif state == ConversationState.FACTURE_CHOIX_DEVIS:
-        numero = message.upper().strip()
+        if message == "liste" or message == "list":
+            # TODO: Récupérer les derniers devis depuis Supabase
+            return {"type": "text", "body": "📂 Fonction liste bientôt disponible !\n\nEntrez le numéro du devis directement."}
+        
+        # Normaliser le numéro de devis
+        numero = message_original.upper().strip()
         if not numero.startswith("DEV"):
-            numero = f"DEV-{numero}"
+            # Essayer de formatter
+            if "-" in numero:
+                numero = f"DEV-{numero}"
+            else:
+                numero = f"DEV-{numero}"
         
         data["numero_devis"] = numero
+        conv["data"] = data
         conv["state"] = ConversationState.FACTURE_CHOIX_TYPE
         save_wa_conversation(phone, conv)
-        return WHATSAPP_MESSAGES["facture_choose_type"]
+        
+        return {"type": "text", "body": f"📄 Devis sélectionné: *{numero}*\n\n" + MSG_FACTURE_TYPE}
     
-    # Facture: Choix type
+    # === ÉTAT: FACTURE - CHOIX TYPE ===
     elif state == ConversationState.FACTURE_CHOIX_TYPE:
-        if "acompte" in message:
+        if message == "1" or "acompte" in message:
             data["type_facture"] = "acompte"
+            conv["data"] = data
             conv["state"] = ConversationState.FACTURE_CONFIRMATION
             save_wa_conversation(phone, conv)
-            return WHATSAPP_MESSAGES["facture_ask_taux"]
+            return {"type": "text", "body": MSG_FACTURE_TAUX}
         
-        if any(w in message for w in ["finale", "solde", "complete"]):
+        if message == "2" or "finale" in message or "solde" in message:
             numero_devis = data.get("numero_devis", "")
             reset_wa_conversation(phone)
             return {
@@ -3608,25 +3671,30 @@ def handle_whatsapp_v2(phone: str, message: str, button_id: Optional[str] = None
                 "phone": phone
             }
         
-        return WHATSAPP_MESSAGES["facture_choose_type"]
+        if message == "3" or "annuler" in message:
+            reset_wa_conversation(phone)
+            return {"type": "text", "body": MSG_CANCELLED}
+        
+        return {"type": "text", "body": MSG_FACTURE_TYPE}
     
-    # Facture: Confirmation (taux acompte)
+    # === ÉTAT: FACTURE - CONFIRMATION (taux acompte) ===
     elif state == ConversationState.FACTURE_CONFIRMATION:
-        if data.get("type_facture") == "acompte":
-            num = extract_number_from_text(message)
-            if num and 0 < num <= 100:
-                numero_devis = data.get("numero_devis", "")
-                reset_wa_conversation(phone)
-                return {
-                    "type": "generate_facture",
-                    "action": "generate_facture_acompte",
-                    "numero_devis": numero_devis,
-                    "taux_acompte": num,
-                    "phone": phone
-                }
-            return {"type": "text", "body": "⚠️ % entre 1 et 100"}
+        num = extract_number(message)
+        if num and 0 < num <= 100:
+            numero_devis = data.get("numero_devis", "")
+            reset_wa_conversation(phone)
+            return {
+                "type": "generate_facture",
+                "action": "generate_facture_acompte",
+                "numero_devis": numero_devis,
+                "taux_acompte": num,
+                "phone": phone
+            }
+        return {"type": "text", "body": "⚠️ Entrez un pourcentage entre 1 et 100.\n\n_Exemple: 30_"}
     
-    return WHATSAPP_MESSAGES["welcome"]
+    # === ÉTAT INCONNU ===
+    reset_wa_conversation(phone)
+    return {"type": "text", "body": MENU_PRINCIPAL}
 
 
 def transcribe_audio_from_url(audio_url: str) -> str:
@@ -3668,8 +3736,6 @@ def transcribe_audio_from_url(audio_url: str) -> str:
 async def whatsapp_webhook(
     From: str = Form(""),
     Body: str = Form(""),
-    ButtonPayload: Optional[str] = Form(None),
-    ListReply: Optional[str] = Form(None),
     MediaUrl0: Optional[str] = Form(None),
     MediaContentType0: Optional[str] = Form(None),
     ProfileName: Optional[str] = Form(None),
@@ -3678,46 +3744,32 @@ async def whatsapp_webhook(
     SmsMessageSid: Optional[str] = Form(None)
 ):
     """
-    Webhook WhatsApp v2 optimisé.
+    Webhook WhatsApp v3 - Simple et efficace.
     
     Retourne:
-    - type="text" → Message simple
-    - type="interactive" → Message avec boutons
-    - type="generate_devis" → Générer un devis (pour Make.com)
-    - type="generate_facture" → Générer une facture (pour Make.com)
+    - type="text" → Message texte simple
+    - type="generate_devis" → Déclenche génération devis
+    - type="generate_facture" → Déclenche génération facture
     """
     try:
         phone = From.replace("whatsapp:", "").strip()
         message = Body.strip()
         
+        print(f"📨 WhatsApp de {phone}: {message[:50]}...")
+        
         # Anti-doublon
         msg_sid = MessageSid or SmsMessageSid
         if msg_sid:
             if msg_sid in _processed_message_sids:
-                return {"skip": True}
+                print(f"⏭️ Message doublon ignoré: {msg_sid}")
+                return {"type": "text", "body": "", "skip": True}
             _processed_message_sids[msg_sid] = datetime.now()
-            # Nettoyage
+            # Nettoyage vieux messages
             old = [s for s, t in _processed_message_sids.items() if (datetime.now() - t).total_seconds() > 300]
             for s in old:
                 del _processed_message_sids[s]
         
-        # Bouton ?
-        button_id = None
-        if ButtonPayload:
-            try:
-                payload = json.loads(ButtonPayload) if isinstance(ButtonPayload, str) else ButtonPayload
-                button_id = payload.get("id") if isinstance(payload, dict) else ButtonPayload
-            except:
-                button_id = ButtonPayload
-        
-        if ListReply and not button_id:
-            try:
-                data = json.loads(ListReply) if isinstance(ListReply, str) else ListReply
-                button_id = data.get("id") if isinstance(data, dict) else ListReply
-            except:
-                button_id = ListReply
-        
-        # Audio ?
+        # Audio → Transcription
         if MediaUrl0 and MediaContentType0 and "audio" in MediaContentType0.lower():
             transcribed = transcribe_audio_from_url(MediaUrl0)
             if transcribed:
@@ -3726,18 +3778,23 @@ async def whatsapp_webhook(
             else:
                 return {
                     "type": "text",
-                    "body": "🎤 Pas compris le vocal.\n\nRéessayez ou écrivez.",
+                    "body": "🎤 Je n'ai pas compris le message vocal.\n\nRéessayez ou écrivez votre message.",
                     "phone": phone
                 }
         
-        # Traiter
-        response = handle_whatsapp_v2(phone, message, button_id)
+        # Pas de message
+        if not message:
+            return {"type": "text", "body": MENU_PRINCIPAL, "phone": phone}
         
+        # Traiter le message
+        response = handle_whatsapp_v3(phone, message)
+        
+        # Ajouter infos
         response["phone"] = phone
         if ProfileName:
             response["profile_name"] = ProfileName
         
-        print(f"📤 Réponse: type={response.get('type')}")
+        print(f"📤 Réponse: type={response.get('type')}, body={response.get('body', '')[:50]}...")
         
         return response
         
@@ -3747,7 +3804,7 @@ async def whatsapp_webhook(
         traceback.print_exc()
         return {
             "type": "text",
-            "body": "⚠️ Erreur.\n\nTapez *menu*",
+            "body": "⚠️ Une erreur s'est produite.\n\nTapez *menu* pour recommencer.",
             "phone": From.replace("whatsapp:", "").strip() if From else ""
         }
 
@@ -3755,8 +3812,9 @@ async def whatsapp_webhook(
 @app.get("/webhook/whatsapp/test")
 async def test_whatsapp_webhook():
     """Test du webhook"""
-    response = handle_whatsapp_v2("33612345678", "bonjour")
-    return {"status": "ok", "response": response}
+    # Test menu
+    response = handle_whatsapp_v3("+33612345678", "bonjour")
+    return {"status": "ok", "test": "menu", "response": response}
 
 
 @app.get("/webhook/whatsapp/sessions")
@@ -3764,7 +3822,7 @@ async def get_whatsapp_sessions():
     """Debug: voir les conversations actives"""
     return {
         "total": len(_whatsapp_conversations),
-        "sessions": list(_whatsapp_conversations.keys())
+        "sessions": {k: v.get("state") for k, v in _whatsapp_conversations.items()}
     }
 
 
@@ -3776,17 +3834,17 @@ async def delete_whatsapp_session(phone: str):
 
 
 # =============================================================================
-# ENDPOINTS EXISTANTS (garder les anciens pour compatibilité)
+# ENDPOINTS API WHATSAPP (existants)
 # =============================================================================
 
 @app.get("/api/whatsapp/devis/{phone}")
 async def get_devis_for_whatsapp(phone: str, limit: int = 5):
-    """Récupère les derniers devis d'un utilisateur pour WhatsApp"""
+    """Récupère les derniers devis d'un utilisateur"""
     if not supabase_client:
         return {"error": "Supabase non configuré", "devis": []}
     
     try:
-        phone_normalized = phone.replace('whatsapp:', '').replace('+', '').strip()
+        phone_normalized = normalize_phone(phone)
         entreprise = get_entreprise_by_whatsapp(phone_normalized)
         if not entreprise:
             return {"error": "Entreprise non trouvée", "devis": []}
@@ -3820,12 +3878,12 @@ async def get_devis_for_whatsapp(phone: str, limit: int = 5):
 
 @app.get("/api/whatsapp/factures/{phone}")
 async def get_factures_for_whatsapp(phone: str, limit: int = 5):
-    """Récupère les dernières factures d'un utilisateur pour WhatsApp"""
+    """Récupère les dernières factures d'un utilisateur"""
     if not supabase_client:
         return {"error": "Supabase non configuré", "factures": []}
     
     try:
-        phone_normalized = phone.replace('whatsapp:', '').replace('+', '').strip()
+        phone_normalized = normalize_phone(phone)
         entreprise = get_entreprise_by_whatsapp(phone_normalized)
         if not entreprise:
             return {"error": "Entreprise non trouvée", "factures": []}
