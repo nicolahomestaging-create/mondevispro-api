@@ -3364,7 +3364,7 @@ def call_haiku(prompt: str, text: str) -> Optional[Dict]:
     
     try:
         response = anthropic_client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Haiku = rapide et pas cher
+            model="claude-3-haiku-20240307",  # Haiku = rapide et pas cher
             max_tokens=500,
             messages=[{"role": "user", "content": prompt.format(text=text)}]
         )
