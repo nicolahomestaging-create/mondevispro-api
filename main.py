@@ -3127,155 +3127,32 @@ def debug_env():
 # =============================================================================
 
 # =============================================================================
-# WEBHOOK WHATSAPP v5 - FLOW STRUCTURÉ
+# WEBHOOK WHATSAPP v6 - FLOW COMPLET STRUCTURÉ
 # =============================================================================
 #
-# INSTRUCTIONS:
-# 1. Dans main.py, cherche "# États de conversation" (vers ligne 3129)
+# INSTRUCTIONS D'INTÉGRATION:
+# 1. Dans main.py, cherche "# ==================== ASSISTANT IA WHATSAPP =="
 # 2. SUPPRIME tout depuis cette ligne jusqu'à la fin du fichier
 # 3. COLLE ce code à la place
-# 4. Assure-toi que "import resend" est en haut du fichier (avec les autres imports)
+# 4. Ajoute "import resend" en haut si pas déjà présent
 #
 # =============================================================================
 
 import resend
 
-# Configuration Twilio (envoi direct)
+# Configuration Twilio
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "+33759714586")
 
-# Configuration Resend (emails)
+# Configuration Resend
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
     print("✅ Resend configuré")
 
-# Template WhatsApp pour le menu avec boutons
+# Template menu WhatsApp
 TEMPLATE_MENU_SID = "HX66922d777c512200cad1d2622199645f"
-
-
-# =============================================================================
-# ENVOI MESSAGES WHATSAPP
-# =============================================================================
-
-def send_whatsapp_message(to: str, body: str) -> bool:
-    """Envoie un message WhatsApp texte simple"""
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
-        print("❌ Twilio non configuré")
-        return False
-    
-    try:
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-        
-        if not to.startswith("whatsapp:"):
-            to = f"whatsapp:{to}"
-        if not to.startswith("whatsapp:+"):
-            to = to.replace("whatsapp:", "whatsapp:+")
-        
-        from_number = f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
-        if not from_number.startswith("whatsapp:+"):
-            from_number = from_number.replace("whatsapp:", "whatsapp:+")
-        
-        data = {"From": from_number, "To": to, "Body": body}
-        response = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
-        
-        if response.status_code in [200, 201]:
-            print(f"✅ WhatsApp envoyé")
-            return True
-        else:
-            print(f"❌ Erreur Twilio: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Erreur: {e}")
-        return False
-
-
-def send_whatsapp_template(to: str, template_sid: str) -> bool:
-    """Envoie un template WhatsApp (avec boutons)"""
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
-        return False
-    
-    try:
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-        
-        if not to.startswith("whatsapp:"):
-            to = f"whatsapp:{to}"
-        if not to.startswith("whatsapp:+"):
-            to = to.replace("whatsapp:", "whatsapp:+")
-        
-        from_number = f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
-        if not from_number.startswith("whatsapp:+"):
-            from_number = from_number.replace("whatsapp:", "whatsapp:+")
-        
-        data = {"From": from_number, "To": to, "ContentSid": template_sid}
-        response = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
-        
-        return response.status_code in [200, 201]
-    except:
-        return False
-
-
-def send_whatsapp_document(to: str, document_url: str, caption: str = "") -> bool:
-    """Envoie un document PDF via WhatsApp"""
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
-        return False
-    
-    try:
-        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
-        
-        if not to.startswith("whatsapp:"):
-            to = f"whatsapp:{to}"
-        if not to.startswith("whatsapp:+"):
-            to = to.replace("whatsapp:", "whatsapp:+")
-        
-        from_number = f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
-        if not from_number.startswith("whatsapp:+"):
-            from_number = from_number.replace("whatsapp:", "whatsapp:+")
-        
-        data = {"From": from_number, "To": to, "MediaUrl": document_url}
-        if caption:
-            data["Body"] = caption
-        
-        response = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
-        return response.status_code in [200, 201]
-    except:
-        return False
-
-
-# =============================================================================
-# ENVOI EMAIL
-# =============================================================================
-
-def send_email_with_pdf(to_email: str, subject: str, body_html: str, pdf_url: str = None, pdf_filename: str = None) -> bool:
-    """Envoie un email avec PDF en pièce jointe"""
-    if not RESEND_API_KEY or not to_email or "@" not in to_email:
-        return False
-    
-    try:
-        params = {
-            "from": "Vocario <contact@vocario.fr>",
-            "to": [to_email],
-            "subject": subject,
-            "html": body_html
-        }
-        
-        if pdf_url and pdf_filename:
-            try:
-                pdf_response = requests.get(pdf_url, timeout=30)
-                if pdf_response.status_code == 200:
-                    import base64
-                    pdf_base64 = base64.b64encode(pdf_response.content).decode('utf-8')
-                    params["attachments"] = [{"filename": pdf_filename, "content": pdf_base64}]
-            except:
-                pass
-        
-        resend.Emails.send(params)
-        print(f"✅ Email envoyé à {to_email}")
-        return True
-    except Exception as e:
-        print(f"❌ Erreur email: {e}")
-        return False
 
 
 # =============================================================================
@@ -3283,34 +3160,40 @@ def send_email_with_pdf(to_email: str, subject: str, body_html: str, pdf_url: st
 # =============================================================================
 
 class State:
-    # Menu
     MENU = "menu"
     
-    # Flow Devis - Étapes obligatoires
-    DEVIS_NOM_CLIENT = "devis_nom_client"
-    DEVIS_TEL_CLIENT = "devis_tel_client"
-    DEVIS_EMAIL_CLIENT = "devis_email_client"
+    # Devis - Étapes
+    DEVIS_NOM = "devis_nom"
+    DEVIS_TEL = "devis_tel"
+    DEVIS_EMAIL = "devis_email"
     DEVIS_ADRESSE = "devis_adresse"
-    DEVIS_TITRE_PROJET = "devis_titre_projet"
+    DEVIS_PROJET = "devis_projet"
     DEVIS_PRESTATIONS = "devis_prestations"
+    DEVIS_PRESTATIONS_SUITE = "devis_prestations_suite"
     DEVIS_OPTIONS = "devis_options"
+    DEVIS_REMISE = "devis_remise"
+    DEVIS_ACOMPTE = "devis_acompte"
     DEVIS_RECAP = "devis_recap"
+    DEVIS_MODIFIER = "devis_modifier"
     DEVIS_GENERE = "devis_genere"
-    DEVIS_ENVOI_EMAIL = "devis_envoi_email"
     
-    # Flow Facture
-    FACTURE_LISTE_DEVIS = "facture_liste_devis"
+    # Facture - Étapes
+    FACTURE_LISTE = "facture_liste"
+    FACTURE_COMPLETE_INFO = "facture_complete_info"
     FACTURE_TYPE = "facture_type"
-    FACTURE_TAUX_ACOMPTE = "facture_taux_acompte"
-    FACTURE_GENEREE = "facture_generee"
-    FACTURE_ENVOI_EMAIL = "facture_envoi_email"
+    FACTURE_ACOMPTE_TAUX = "facture_acompte_taux"
+    FACTURE_ACOMPTE_PAYE = "facture_acompte_paye"
+    FACTURE_ACOMPTE_MODE = "facture_acompte_mode"
+    FACTURE_GENERE = "facture_genere"
     
     # Documents
     DOCUMENTS_LISTE = "documents_liste"
+    DOCUMENTS_DETAIL = "documents_detail"
+    DOCUMENTS_RECHERCHE = "documents_recherche"
 
 
 # =============================================================================
-# GESTION CONVERSATIONS
+# CACHE CONVERSATIONS
 # =============================================================================
 
 _conversations: Dict[str, Dict] = {}
@@ -3375,11 +3258,119 @@ def reset_conv(phone: str):
 
 
 # =============================================================================
-# PARSING IA (minimal, seulement pour prestations)
+# ENVOI WHATSAPP / EMAIL
+# =============================================================================
+
+def send_whatsapp(to: str, body: str) -> bool:
+    """Envoie un message texte WhatsApp"""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        print("❌ Twilio non configuré")
+        return False
+    
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+        
+        to_formatted = to if to.startswith("whatsapp:") else f"whatsapp:+{normalize_phone(to)}"
+        from_formatted = f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
+        
+        data = {"From": from_formatted, "To": to_formatted, "Body": body}
+        response = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        
+        if response.status_code in [200, 201]:
+            print(f"✅ WhatsApp envoyé à {to}")
+            return True
+        else:
+            print(f"❌ Erreur Twilio: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        print(f"❌ Erreur: {e}")
+        return False
+
+
+def send_whatsapp_template(to: str, template_sid: str) -> bool:
+    """Envoie un template WhatsApp (menu avec boutons)"""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        return False
+    
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+        
+        to_formatted = to if to.startswith("whatsapp:") else f"whatsapp:+{normalize_phone(to)}"
+        from_formatted = f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
+        
+        data = {"From": from_formatted, "To": to_formatted, "ContentSid": template_sid}
+        response = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        
+        return response.status_code in [200, 201]
+    except:
+        return False
+
+
+def send_whatsapp_document(to: str, document_url: str, caption: str = "") -> bool:
+    """Envoie un document PDF via WhatsApp"""
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        return False
+    
+    try:
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+        
+        to_formatted = to if to.startswith("whatsapp:") else f"whatsapp:+{normalize_phone(to)}"
+        from_formatted = f"whatsapp:{TWILIO_WHATSAPP_NUMBER}"
+        
+        data = {"From": from_formatted, "To": to_formatted, "MediaUrl": document_url}
+        if caption:
+            data["Body"] = caption
+        
+        response = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        return response.status_code in [200, 201]
+    except:
+        return False
+
+
+def send_email_with_pdf(to_email: str, subject: str, body_html: str, pdf_url: str = None, pdf_filename: str = None) -> bool:
+    """Envoie un email avec PDF en pièce jointe"""
+    if not RESEND_API_KEY:
+        print("❌ Resend non configuré")
+        return False
+    
+    if not to_email or "@" not in to_email:
+        print(f"❌ Email invalide: {to_email}")
+        return False
+    
+    try:
+        params = {
+            "from": "Vocario <contact@vocario.fr>",
+            "to": [to_email],
+            "subject": subject,
+            "html": body_html
+        }
+        
+        # Télécharger et attacher le PDF
+        if pdf_url and pdf_filename:
+            try:
+                pdf_response = requests.get(pdf_url, timeout=30)
+                if pdf_response.status_code == 200:
+                    import base64
+                    pdf_base64 = base64.b64encode(pdf_response.content).decode('utf-8')
+                    params["attachments"] = [{"filename": pdf_filename, "content": pdf_base64}]
+                    print(f"📎 PDF attaché: {pdf_filename}")
+            except Exception as e:
+                print(f"⚠️ Erreur téléchargement PDF: {e}")
+        
+        resend.Emails.send(params)
+        print(f"✅ Email envoyé à {to_email}")
+        return True
+    except Exception as e:
+        print(f"❌ Erreur email: {e}")
+        return False
+
+
+# =============================================================================
+# PARSING IA (Claude Haiku - rapide et pas cher)
 # =============================================================================
 
 def parse_prestations_ia(text: str) -> Optional[List[Dict]]:
-    """Parse les prestations avec l'IA"""
+    """Parse les prestations avec Claude"""
     if not anthropic_client:
         return None
     
@@ -3387,19 +3378,19 @@ def parse_prestations_ia(text: str) -> Optional[List[Dict]]:
 
 Texte: """ + text + """
 
-Format attendu:
+Format:
 {"prestations": [{"description": "...", "quantite": 1, "unite": "u", "prix_unitaire": 0}]}
 
 Règles:
-- description = ce qui est fait
+- description = ce qui est fait (commence par majuscule)
 - quantite = nombre (défaut 1)
-- unite = m², m, h, u, forfait, jour, etc.
-- prix_unitaire = prix UNITAIRE (pas le total)
+- unite = m², m, h, u, forfait, jour, pièce, etc.
+- prix_unitaire = prix UNITAIRE HT (pas le total)
 
 Exemples:
 "carrelage 30m2 50€" → {"prestations": [{"description": "Carrelage", "quantite": 30, "unite": "m²", "prix_unitaire": 50}]}
 "peinture 800€" → {"prestations": [{"description": "Peinture", "quantite": 1, "unite": "forfait", "prix_unitaire": 800}]}
-"2 fenêtres à 350€" → {"prestations": [{"description": "Fenêtre", "quantite": 2, "unite": "unité", "prix_unitaire": 350}]}"""
+"2 fenêtres 350€" → {"prestations": [{"description": "Fenêtre", "quantite": 2, "unite": "pièce", "prix_unitaire": 350}]}"""
 
     try:
         response = anthropic_client.messages.create(
@@ -3428,25 +3419,243 @@ Exemples:
 
 
 # =============================================================================
+# FONCTIONS SUPABASE
+# =============================================================================
+
+def get_entreprise(phone: str) -> Optional[Dict]:
+    """Récupère l'entreprise par numéro WhatsApp"""
+    if not supabase_client:
+        return None
+    
+    try:
+        phone_clean = normalize_phone(phone)
+        
+        # Chercher par whatsapp
+        result = supabase_client.table('entreprises').select('*').eq('whatsapp', phone_clean).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        
+        # Chercher par tel
+        result = supabase_client.table('entreprises').select('*').eq('tel', phone_clean).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        
+        return None
+    except Exception as e:
+        print(f"❌ Erreur get_entreprise: {e}")
+        return None
+
+
+def check_projet_doublon(entreprise_id: str, client_nom: str, titre_projet: str) -> Optional[str]:
+    """Vérifie si un projet existe déjà et retourne un nouveau nom si doublon"""
+    if not supabase_client or not titre_projet:
+        return None
+    
+    try:
+        result = supabase_client.table('devis')\
+            .select('titre_projet')\
+            .eq('entreprise_id', entreprise_id)\
+            .ilike('client_nom', f'%{client_nom}%')\
+            .ilike('titre_projet', f'{titre_projet}%')\
+            .is_('deleted_at', 'null')\
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            count = len(result.data)
+            return f"{titre_projet} {count + 1}"
+        
+        return None
+    except:
+        return None
+
+
+def get_devis_pour_facturation(phone: str) -> List[Dict]:
+    """Récupère les devis avec leur statut de facturation"""
+    if not supabase_client:
+        return []
+    
+    try:
+        entreprise = get_entreprise(phone)
+        if not entreprise:
+            return []
+        
+        # Récupérer les devis
+        devis_result = supabase_client.table('devis')\
+            .select('id, numero_devis, client_nom, client_email, telephone_client, client_adresse, titre_projet, total_ht, total_ttc, prestations')\
+            .eq('entreprise_id', entreprise['id'])\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(10)\
+            .execute()
+        
+        result = []
+        for d in devis_result.data or []:
+            devis_id = d.get("id")
+            
+            # Récupérer les factures liées
+            factures = []
+            acompte_total = 0
+            acompte_paye = 0
+            facture_finale = None
+            
+            try:
+                fac_result = supabase_client.table('factures')\
+                    .select('id, numero_facture, type_facture, total_ttc, statut, mode_paiement, date_paiement')\
+                    .eq('devis_id', devis_id)\
+                    .is_('deleted_at', 'null')\
+                    .execute()
+                
+                for f in fac_result.data or []:
+                    if f.get("type_facture") == "acompte":
+                        acompte_total += float(f.get("total_ttc", 0))
+                        if f.get("statut") == "payee":
+                            acompte_paye += float(f.get("total_ttc", 0))
+                        factures.append({
+                            "numero": f.get("numero_facture"),
+                            "montant": float(f.get("total_ttc", 0)),
+                            "statut": f.get("statut"),
+                            "paye": f.get("statut") == "payee",
+                            "mode": f.get("mode_paiement"),
+                            "date": f.get("date_paiement")
+                        })
+                    elif f.get("type_facture") == "complete":
+                        facture_finale = f
+            except:
+                pass
+            
+            total_ttc = float(d.get("total_ttc", 0))
+            
+            result.append({
+                "id": devis_id,
+                "numero": d.get("numero_devis"),
+                "client_nom": d.get("client_nom"),
+                "client_email": d.get("client_email"),
+                "client_tel": d.get("telephone_client"),
+                "client_adresse": d.get("client_adresse"),
+                "titre_projet": d.get("titre_projet"),
+                "total_ht": float(d.get("total_ht", 0)),
+                "total_ttc": total_ttc,
+                "prestations": d.get("prestations"),
+                "factures_acompte": factures,
+                "acompte_total": acompte_total,
+                "acompte_paye": acompte_paye,
+                "acompte_en_attente": acompte_total - acompte_paye,
+                "facture_finale": facture_finale,
+                "reste_a_facturer": total_ttc - acompte_paye,
+                "entierement_facture": facture_finale is not None
+            })
+        
+        return result
+    except Exception as e:
+        print(f"❌ Erreur get_devis_pour_facturation: {e}")
+        return []
+
+
+def get_documents(phone: str, limit: int = 10) -> Dict:
+    """Récupère les derniers documents (devis + factures)"""
+    if not supabase_client:
+        return {"devis": [], "factures": []}
+    
+    try:
+        entreprise = get_entreprise(phone)
+        if not entreprise:
+            return {"devis": [], "factures": []}
+        
+        # Devis
+        devis = supabase_client.table('devis')\
+            .select('numero_devis, client_nom, total_ttc, statut, pdf_url, titre_projet')\
+            .eq('entreprise_id', entreprise['id'])\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        devis_list = []
+        for d in devis.data or []:
+            devis_list.append({
+                "numero": d.get("numero_devis"),
+                "client": d.get("client_nom"),
+                "projet": d.get("titre_projet"),
+                "total": float(d.get("total_ttc", 0)),
+                "statut": d.get("statut"),
+                "pdf_url": d.get("pdf_url")
+            })
+        
+        # Factures
+        factures = supabase_client.table('factures')\
+            .select('numero_facture, client_nom, total_ttc, statut, type_facture, pdf_url, titre_projet')\
+            .eq('entreprise_id', entreprise['id'])\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        factures_list = []
+        for f in factures.data or []:
+            factures_list.append({
+                "numero": f.get("numero_facture"),
+                "client": f.get("client_nom"),
+                "projet": f.get("titre_projet"),
+                "total": float(f.get("total_ttc", 0)),
+                "statut": f.get("statut"),
+                "type": f.get("type_facture"),
+                "pdf_url": f.get("pdf_url")
+            })
+        
+        return {"devis": devis_list, "factures": factures_list}
+    except Exception as e:
+        print(f"❌ Erreur get_documents: {e}")
+        return {"devis": [], "factures": []}
+
+
+def marquer_facture_payee(numero_facture: str, phone: str, mode_paiement: str = "virement") -> bool:
+    """Marque une facture comme payée"""
+    if not supabase_client:
+        return False
+    
+    try:
+        entreprise = get_entreprise(phone)
+        if not entreprise:
+            return False
+        
+        supabase_client.table('factures')\
+            .update({
+                "statut": "payee",
+                "mode_paiement": mode_paiement,
+                "date_paiement": datetime.now().isoformat()
+            })\
+            .eq("numero_facture", numero_facture)\
+            .eq("entreprise_id", entreprise['id'])\
+            .execute()
+        
+        return True
+    except Exception as e:
+        print(f"❌ Erreur marquer_facture_payee: {e}")
+        return False
+
+
+# =============================================================================
 # GÉNÉRATION DEVIS
 # =============================================================================
 
-def generer_devis_whatsapp(phone: str, data: Dict) -> Dict:
-    """Génère un devis depuis les données collectées"""
+def generer_devis_complet(phone: str, data: Dict) -> Dict:
+    """Génère un devis complet depuis les données collectées"""
     try:
-        entreprise = get_entreprise_by_whatsapp(phone)
+        entreprise = get_entreprise(phone)
         if not entreprise:
             return {"success": False, "error": "Entreprise non trouvée. Configurez votre compte sur vocario.fr"}
         
-        # TVA
-        tva_taux = entreprise.get("tva_taux") or 20
+        # TVA selon forme juridique
+        tva_taux = entreprise.get("tva_taux")
+        if tva_taux is None:
+            tva_taux = 20
         if entreprise.get("forme_juridique") in ["auto-entrepreneur", "micro-entreprise"]:
             tva_taux = 0
         
-        # Numéro de devis
+        # Numéro de devis unique
         numero_devis = f"DEV-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
         
-        # Objets
+        # Construire les objets
         entreprise_obj = Entreprise(
             nom=entreprise.get("nom", ""),
             gerant=entreprise.get("gerant", ""),
@@ -3471,6 +3680,7 @@ def generer_devis_whatsapp(phone: str, data: Dict) -> Dict:
             email=data.get("client_email", ""),
         )
         
+        # Prestations
         prestations_list = []
         for p in data.get("prestations", []):
             prestations_list.append(Prestation(
@@ -3488,7 +3698,7 @@ def generer_devis_whatsapp(phone: str, data: Dict) -> Dict:
             remise_type = "pourcentage"
             remise_valeur = data.get("remise")
         
-        # Requête
+        # Requête devis
         devis_request = DevisRequest(
             entreprise=entreprise_obj,
             client=client_obj,
@@ -3506,11 +3716,19 @@ def generer_devis_whatsapp(phone: str, data: Dict) -> Dict:
         # Générer PDF
         filepath_pdf, numero, total_ht, total_ttc = generer_pdf_devis(devis_request, numero_devis)
         
-        # Upload
+        # Upload Supabase
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
         
-        # Sauvegarder dashboard
-        prestations_db = [{'description': p.get("description"), 'quantite': p.get("quantite"), 'unite': p.get("unite"), 'prix_unitaire': p.get("prix_unitaire")} for p in data.get("prestations", [])]
+        # Sauvegarder dans dashboard
+        prestations_db = []
+        for p in data.get("prestations", []):
+            prestations_db.append({
+                'description': p.get("description"),
+                'quantite': p.get("quantite"),
+                'unite': p.get("unite"),
+                'prix_unitaire': p.get("prix_unitaire"),
+                'tva_taux': tva_taux
+            })
         
         save_devis_to_dashboard(
             entreprise_id=entreprise['id'],
@@ -3529,19 +3747,31 @@ def generer_devis_whatsapp(phone: str, data: Dict) -> Dict:
             delai=data.get("delai")
         )
         
+        # Mettre à jour le devis avec l'adresse client
+        if data.get("client_adresse") and supabase_client:
+            try:
+                supabase_client.table('devis')\
+                    .update({"client_adresse": data.get("client_adresse")})\
+                    .eq("numero_devis", numero_devis)\
+                    .execute()
+            except:
+                pass
+        
         return {
             "success": True,
             "numero": numero_devis,
             "total_ht": total_ht,
             "total_ttc": total_ttc,
             "pdf_url": pdf_url,
-            "client_email": data.get("client_email", ""),
-            "client_nom": data.get("client_nom", ""),
-            "tva_taux": tva_taux
+            "client_nom": data.get("client_nom"),
+            "client_tel": data.get("client_tel"),
+            "client_email": data.get("client_email"),
+            "tva_taux": tva_taux,
+            "acompte": data.get("acompte", 0)
         }
         
     except Exception as e:
-        print(f"❌ Erreur génération: {e}")
+        print(f"❌ Erreur génération devis: {e}")
         import traceback
         traceback.print_exc()
         return {"success": False, "error": str(e)}
@@ -3551,114 +3781,38 @@ def generer_devis_whatsapp(phone: str, data: Dict) -> Dict:
 # GÉNÉRATION FACTURE
 # =============================================================================
 
-def get_devis_avec_acomptes(phone: str) -> List[Dict]:
-    """Récupère les devis avec leur statut d'acompte"""
-    result = []
-    
-    if not supabase_client:
-        return result
-    
+def generer_facture_complete(phone: str, devis: Dict, type_facture: str, taux_acompte: int = 30) -> Dict:
+    """Génère une facture (acompte ou finale)"""
     try:
-        entreprise = get_entreprise_by_whatsapp(normalize_phone(phone))
-        if not entreprise:
-            return result
-        
-        # Récupérer les devis
-        devis_result = supabase_client.table('devis')\
-            .select('id, numero_devis, client_nom, total_ht, total_ttc, client_email, telephone_client')\
-            .eq('entreprise_id', entreprise['id'])\
-            .is_('deleted_at', 'null')\
-            .order('created_at', desc=True)\
-            .limit(10)\
-            .execute()
-        
-        for d in devis_result.data or []:
-            devis_id = d.get("id")
-            
-            # Vérifier les acomptes
-            acompte_total = 0
-            acompte_factures = []
-            try:
-                factures = supabase_client.table('factures')\
-                    .select('numero_facture, total_ttc, statut')\
-                    .eq('devis_id', devis_id)\
-                    .eq('type_facture', 'acompte')\
-                    .execute()
-                
-                for f in factures.data or []:
-                    acompte_total += float(f.get("total_ttc", 0))
-                    acompte_factures.append({
-                        "numero": f.get("numero_facture"),
-                        "montant": float(f.get("total_ttc", 0)),
-                        "paye": f.get("statut") == "payee"
-                    })
-            except:
-                pass
-            
-            # Vérifier si facture finale existe
-            facture_finale = None
-            try:
-                finale = supabase_client.table('factures')\
-                    .select('numero_facture, total_ttc, statut')\
-                    .eq('devis_id', devis_id)\
-                    .eq('type_facture', 'complete')\
-                    .execute()
-                
-                if finale.data and len(finale.data) > 0:
-                    facture_finale = finale.data[0]
-            except:
-                pass
-            
-            result.append({
-                "id": devis_id,
-                "numero": d.get("numero_devis"),
-                "client": d.get("client_nom"),
-                "client_email": d.get("client_email"),
-                "client_tel": d.get("telephone_client"),
-                "total_ht": float(d.get("total_ht", 0)),
-                "total_ttc": float(d.get("total_ttc", 0)),
-                "acompte_total": acompte_total,
-                "acompte_factures": acompte_factures,
-                "acompte_paye": all(f["paye"] for f in acompte_factures) if acompte_factures else False,
-                "facture_finale": facture_finale,
-                "reste_a_payer": float(d.get("total_ttc", 0)) - acompte_total
-            })
-        
-    except Exception as e:
-        print(f"❌ Erreur récup devis: {e}")
-    
-    return result
-
-
-def generer_facture_whatsapp(phone: str, devis: Dict, type_facture: str, taux_acompte: int = 30) -> Dict:
-    """Génère une facture"""
-    try:
-        entreprise = get_entreprise_by_whatsapp(normalize_phone(phone))
+        entreprise = get_entreprise(phone)
         if not entreprise:
             return {"success": False, "error": "Entreprise non trouvée"}
         
         # TVA
-        tva_taux = entreprise.get("tva_taux") or 20
+        tva_taux = entreprise.get("tva_taux")
+        if tva_taux is None:
+            tva_taux = 20
         if entreprise.get("forme_juridique") in ["auto-entrepreneur", "micro-entreprise"]:
             tva_taux = 0
         
         # Calculs
         total_ttc_devis = devis.get("total_ttc", 0)
         total_ht_devis = devis.get("total_ht", 0)
-        acompte_deja = devis.get("acompte_total", 0)
+        acompte_paye = devis.get("acompte_paye", 0)
         
         if type_facture == "acompte":
             numero_facture = f"FAC-ACO-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-            total_ht = round(total_ht_devis * taux_acompte / 100, 2)
             total_ttc = round(total_ttc_devis * taux_acompte / 100, 2)
-            description = f"Acompte {taux_acompte}% sur devis {devis.get('numero')}"
-        else:  # finale
+            total_ht = round(total_ht_devis * taux_acompte / 100, 2)
+            description = f"Acompte {taux_acompte}% - {devis.get('titre_projet', 'Devis ' + devis.get('numero', ''))}"
+        else:  # finale ou complete
             numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-            total_ttc = total_ttc_devis - acompte_deja
-            total_ht = total_ht_devis - (acompte_deja / (1 + tva_taux/100)) if tva_taux > 0 else total_ht_devis - acompte_deja
-            description = f"Solde sur devis {devis.get('numero')}"
-            if acompte_deja > 0:
-                description += f" (acompte de {acompte_deja:.2f}€ déduit)"
+            total_ttc = round(total_ttc_devis - acompte_paye, 2)
+            total_ht = round(total_ht_devis - (acompte_paye / (1 + tva_taux/100)) if tva_taux > 0 else total_ht_devis - acompte_paye, 2)
+            if acompte_paye > 0:
+                description = f"Solde - {devis.get('titre_projet', '')} (acompte de {acompte_paye:.2f}€ déduit)"
+            else:
+                description = f"{devis.get('titre_projet', 'Facture')}"
         
         # Objets
         entreprise_obj = Entreprise(
@@ -3676,7 +3830,8 @@ def generer_facture_whatsapp(phone: str, devis: Dict, type_facture: str, taux_ac
         )
         
         client_obj = Client(
-            nom=devis.get("client", ""),
+            nom=devis.get("client_nom", ""),
+            adresse=devis.get("client_adresse", ""),
             tel=devis.get("client_tel", ""),
             email=devis.get("client_email", ""),
         )
@@ -3707,22 +3862,22 @@ def generer_facture_whatsapp(phone: str, devis: Dict, type_facture: str, taux_ac
         filepath_pdf, numero, _, _ = generer_pdf_facture(facture_request, numero_facture)
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_facture}.pdf")
         
-        # Sauvegarder dashboard
+        # Sauvegarder dans dashboard
         save_facture_to_dashboard(
             entreprise_id=entreprise['id'],
             devis_id=devis.get("id"),
             numero_facture=numero_facture,
-            client_nom=devis.get("client"),
+            client_nom=devis.get("client_nom"),
             client_email=devis.get("client_email"),
             client_telephone=devis.get("client_tel"),
-            client_adresse=None,
-            titre_projet=None,
+            client_adresse=devis.get("client_adresse"),
+            titre_projet=devis.get("titre_projet"),
             prestations=[{"description": description, "quantite": 1, "unite": "forfait", "prix_unitaire": total_ht}],
             total_ht=total_ht,
             total_ttc=total_ttc,
             pdf_url=pdf_url,
             word_url=None,
-            type_facture=type_facture if type_facture == "acompte" else "complete",
+            type_facture="acompte" if type_facture == "acompte" else "complete",
             tva_taux=tva_taux
         )
         
@@ -3732,135 +3887,55 @@ def generer_facture_whatsapp(phone: str, devis: Dict, type_facture: str, taux_ac
             "total_ht": total_ht,
             "total_ttc": total_ttc,
             "pdf_url": pdf_url,
+            "client_nom": devis.get("client_nom"),
+            "client_tel": devis.get("client_tel"),
             "client_email": devis.get("client_email"),
-            "client_nom": devis.get("client"),
-            "type": type_facture
+            "type": type_facture,
+            "devis_numero": devis.get("numero")
         }
         
     except Exception as e:
-        print(f"❌ Erreur facture: {e}")
+        print(f"❌ Erreur génération facture: {e}")
         import traceback
         traceback.print_exc()
         return {"success": False, "error": str(e)}
-
-
-def marquer_facture_payee(numero_facture: str, phone: str) -> bool:
-    """Marque une facture comme payée"""
-    if not supabase_client:
-        return False
-    
-    try:
-        entreprise = get_entreprise_by_whatsapp(normalize_phone(phone))
-        if not entreprise:
-            return False
-        
-        supabase_client.table('factures')\
-            .update({"statut": "payee"})\
-            .eq("numero_facture", numero_facture)\
-            .eq("entreprise_id", entreprise['id'])\
-            .execute()
-        
-        return True
-    except:
-        return False
-
-
-# =============================================================================
-# DOCUMENTS
-# =============================================================================
-
-def get_documents(phone: str) -> Dict:
-    """Récupère les derniers documents"""
-    result = {"devis": [], "factures": []}
-    
-    if not supabase_client:
-        return result
-    
-    try:
-        entreprise = get_entreprise_by_whatsapp(normalize_phone(phone))
-        if not entreprise:
-            return result
-        
-        # Devis
-        devis = supabase_client.table('devis')\
-            .select('numero_devis, client_nom, total_ttc, statut, pdf_url')\
-            .eq('entreprise_id', entreprise['id'])\
-            .is_('deleted_at', 'null')\
-            .order('created_at', desc=True)\
-            .limit(5)\
-            .execute()
-        
-        for d in devis.data or []:
-            result["devis"].append({
-                "numero": d.get("numero_devis"),
-                "client": d.get("client_nom"),
-                "total": d.get("total_ttc"),
-                "statut": d.get("statut"),
-                "pdf_url": d.get("pdf_url")
-            })
-        
-        # Factures
-        factures = supabase_client.table('factures')\
-            .select('numero_facture, client_nom, total_ttc, statut, type_facture, pdf_url')\
-            .eq('entreprise_id', entreprise['id'])\
-            .is_('deleted_at', 'null')\
-            .order('created_at', desc=True)\
-            .limit(5)\
-            .execute()
-        
-        for f in factures.data or []:
-            result["factures"].append({
-                "numero": f.get("numero_facture"),
-                "client": f.get("client_nom"),
-                "total": f.get("total_ttc"),
-                "statut": f.get("statut"),
-                "type": f.get("type_facture"),
-                "pdf_url": f.get("pdf_url")
-            })
-        
-    except Exception as e:
-        print(f"❌ Erreur docs: {e}")
-    
-    return result
 
 
 # =============================================================================
 # HANDLER PRINCIPAL
 # =============================================================================
 
-def handle_message(phone: str, message: str):
+def handle_message(phone: str, message: str, button_payload: str = None):
     """Gère un message WhatsApp"""
     phone = normalize_phone(phone)
     phone_full = f"+{phone}"
     msg = (message or "").strip()
     msg_lower = msg.lower()
     
-    print(f"📱 [{phone}] {msg_lower[:50]}")
+    print(f"📱 [{phone}] Msg: '{msg_lower[:50]}' | Btn: {button_payload}")
     
     conv = get_conv(phone)
     state = conv.get("state", State.MENU)
     data = conv.get("data", {})
     
-    # =========================================================================
-    # COMMANDES GLOBALES
-    # =========================================================================
-    
-    if msg_lower in ["menu", "start", "0", "annuler", "cancel", "stop"]:
+    # === COMMANDES GLOBALES ===
+    if msg_lower in ["menu", "start", "bonjour", "salut", "hello", "0"]:
         reset_conv(phone)
         send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
         return
     
-    # =========================================================================
-    # ÉTAT: MENU
-    # =========================================================================
+    if msg_lower in ["annuler", "cancel", "stop", "reset"]:
+        reset_conv(phone)
+        send_whatsapp(phone_full, "❌ Annulé.\n\nTapez *menu* pour recommencer.")
+        return
     
-    if state == State.MENU:
-        
-        if msg_lower in ["nouveau devis", "1", "devis"]:
-            conv["state"] = State.DEVIS_NOM_CLIENT
+    # === BOUTONS DU MENU ===
+    if button_payload:
+        if button_payload in ["nouveau_devis", "new_devis", "Nouveau devis"]:
+            conv["state"] = State.DEVIS_NOM
             conv["data"] = {}
             save_conv(phone, conv)
-            send_whatsapp_message(phone_full, """📝 *NOUVEAU DEVIS*
+            send_whatsapp(phone_full, """📝 *NOUVEAU DEVIS*
 
 ━━━━━━━━━━━━━━━━━━
 *Étape 1/6* - Nom du client
@@ -3871,222 +3946,162 @@ Quel est le *nom du client* ?
 _Exemple: M. Dupont_""")
             return
         
-        if msg_lower in ["nouvelle facture", "2", "facture"]:
-            # Récupérer les devis avec acomptes
-            devis_list = get_devis_avec_acomptes(phone)
-            
+        if button_payload in ["nouvelle_facture", "new_facture", "Nouvelle facture"]:
+            devis_list = get_devis_pour_facturation(phone)
             if not devis_list:
-                send_whatsapp_message(phone_full, """📭 *Aucun devis trouvé*
-
-Créez d'abord un devis avant de faire une facture.
-
-Tapez *1* pour créer un devis.""")
+                send_whatsapp(phone_full, "📭 *Aucun devis*\n\nCréez d'abord un devis.\n\nTapez *menu*")
                 return
             
-            # Afficher la liste
-            msg = "🧾 *NOUVELLE FACTURE*\n\n━━━━━━━━━━━━━━━━━━\nChoisissez un devis :\n━━━━━━━━━━━━━━━━━━\n\n"
-            
+            msg = "🧾 *NOUVELLE FACTURE*\n\n"
             for i, d in enumerate(devis_list, 1):
-                statut = ""
-                if d["facture_finale"]:
-                    statut = "✅ Facturé"
-                elif d["acompte_total"] > 0:
-                    if d["acompte_paye"]:
-                        statut = f"💰 Acompte payé ({d['acompte_total']:.0f}€)"
-                    else:
-                        statut = f"⏳ Acompte en attente ({d['acompte_total']:.0f}€)"
-                else:
-                    statut = "📄 Pas encore facturé"
-                
-                msg += f"*{i}.* {d['numero']}\n"
-                msg += f"   👤 {d['client']}\n"
-                msg += f"   💰 {d['total_ttc']:.2f}€\n"
-                msg += f"   {statut}\n\n"
+                msg += f"*{i}.* {d['numero']} | {d['client_nom']}\n"
+                msg += f"   💰 {d['total_ttc']:.0f}€"
+                if d['acompte_paye'] > 0:
+                    msg += f" ✅ Acompte {d['acompte_paye']:.0f}€"
+                elif d['acompte_en_attente'] > 0:
+                    msg += f" ⏳ Acompte en attente"
+                elif d['entierement_facture']:
+                    msg += f" ✅ Facturé"
+                msg += "\n\n"
+            msg += "Tapez le numéro (1, 2, 3...)"
             
-            msg += "_Tapez le numéro (1, 2, 3...)_"
-            
-            conv["state"] = State.FACTURE_LISTE_DEVIS
+            conv["state"] = State.FACTURE_LISTE
             conv["data"] = {"devis_list": devis_list}
             save_conv(phone, conv)
-            send_whatsapp_message(phone_full, msg)
+            send_whatsapp(phone_full, msg)
             return
         
-        if msg_lower in ["mes documents", "3", "documents"]:
+        if button_payload in ["mes_documents", "documents", "Mes documents"]:
             docs = get_documents(phone)
+            if not docs["devis"] and not docs["factures"]:
+                send_whatsapp(phone_full, "📂 *Aucun document*\n\nTapez *menu*")
+                return
             
             msg = "📂 *MES DOCUMENTS*\n\n"
+            all_docs = [{"type": "devis", **d} for d in docs["devis"]] + [{"type": "facture", **f} for f in docs["factures"]]
+            for i, doc in enumerate(all_docs[:10], 1):
+                emoji = "📝" if doc["type"] == "devis" else "🧾"
+                statut = "✅" if doc.get("statut") in ["payee", "accepte"] else "⏳"
+                msg += f"{i}. {emoji} {doc['numero']} | {doc.get('client','')} | {doc.get('total',0):.0f}€ {statut}\n"
             
-            if docs["devis"]:
-                msg += "*📝 Derniers devis :*\n"
-                for d in docs["devis"]:
-                    emoji = "✅" if d["statut"] == "accepte" else "⏳"
-                    msg += f"• {d['numero']} - {d['client']} ({d['total']:.0f}€) {emoji}\n"
-                msg += "\n"
-            
-            if docs["factures"]:
-                msg += "*🧾 Dernières factures :*\n"
-                for f in docs["factures"]:
-                    emoji = "✅" if f["statut"] == "payee" else "⏳"
-                    type_txt = "Acompte" if f["type"] == "acompte" else "Facture"
-                    msg += f"• {f['numero']} - {f['client']} ({f['total']:.0f}€) {emoji}\n"
-            
-            if not docs["devis"] and not docs["factures"]:
-                msg += "_Aucun document_\n"
-            
-            msg += "\n━━━━━━━━━━━━━━━━━━\n📤 Pour renvoyer un document, tapez son numéro\n(ex: DEV-20250130-ABC123)\n\nOu tapez *menu* pour revenir"
-            
+            msg += "\nTapez le numéro pour voir/renvoyer"
             conv["state"] = State.DOCUMENTS_LISTE
-            conv["data"] = docs
+            conv["data"] = {"documents": all_docs[:10]}
             save_conv(phone, conv)
-            send_whatsapp_message(phone_full, msg)
+            send_whatsapp(phone_full, msg)
             return
-        
-        # Par défaut, afficher le menu
+    
+    # === ÉTAT: MENU ===
+    if state == State.MENU:
+        if "devis" in msg_lower or msg_lower == "1":
+            return handle_message(phone, "", "nouveau_devis")
+        if "facture" in msg_lower or msg_lower == "2":
+            return handle_message(phone, "", "nouvelle_facture")
+        if "document" in msg_lower or msg_lower == "3":
+            return handle_message(phone, "", "mes_documents")
         send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
         return
     
-    # =========================================================================
-    # FLOW DEVIS
-    # =========================================================================
+    # === FLOW DEVIS ===
     
-    # Étape 1: Nom client
-    if state == State.DEVIS_NOM_CLIENT:
+    # Étape 1: Nom
+    if state == State.DEVIS_NOM:
         if len(msg) < 2:
-            send_whatsapp_message(phone_full, "❌ *Le nom est obligatoire*\n\nEntrez le nom du client :")
+            send_whatsapp(phone_full, "❌ Le nom doit contenir au moins 2 caractères.")
             return
-        
         data["client_nom"] = msg
         conv["data"] = data
-        conv["state"] = State.DEVIS_TEL_CLIENT
+        conv["state"] = State.DEVIS_TEL
         save_conv(phone, conv)
-        
-        send_whatsapp_message(phone_full, f"""✅ Client : *{msg}*
+        send_whatsapp(phone_full, f"""✅ Client : *{msg}*
 
-━━━━━━━━━━━━━━━━━━
 *Étape 2/6* - Téléphone
-━━━━━━━━━━━━━━━━━━
 
-Quel est son *numéro de téléphone* ?
-
-_Exemple: 06 12 34 56 78_""")
+Quel est son *numéro de téléphone* ?""")
         return
     
     # Étape 2: Téléphone
-    if state == State.DEVIS_TEL_CLIENT:
-        # Nettoyer le numéro
+    if state == State.DEVIS_TEL:
         tel = re.sub(r'[^0-9+]', '', msg)
-        
         if len(tel) < 10:
-            send_whatsapp_message(phone_full, "❌ *Le téléphone est obligatoire*\n\nEntrez un numéro valide (10 chiffres minimum) :")
+            send_whatsapp(phone_full, "❌ Numéro invalide (minimum 10 chiffres)")
             return
-        
         data["client_tel"] = tel
         conv["data"] = data
-        conv["state"] = State.DEVIS_EMAIL_CLIENT
+        conv["state"] = State.DEVIS_EMAIL
         save_conv(phone, conv)
-        
-        send_whatsapp_message(phone_full, f"""✅ Téléphone : *{tel}*
+        send_whatsapp(phone_full, f"""✅ Téléphone : *{tel}*
 
-━━━━━━━━━━━━━━━━━━
-*Étape 3/6* - Email
-━━━━━━━━━━━━━━━━━━
+*Étape 3/6* - Email (optionnel)
 
 Quel est son *email* ?
-
 _Tapez *non* si pas d'email_""")
         return
     
     # Étape 3: Email
-    if state == State.DEVIS_EMAIL_CLIENT:
-        if msg_lower in ["non", "no", "pas", "aucun", "-", "n"]:
+    if state == State.DEVIS_EMAIL:
+        if msg_lower in ["non", "no", "-", "passer"]:
             data["client_email"] = ""
         elif "@" in msg and "." in msg:
             data["client_email"] = msg.lower().strip()
         else:
-            send_whatsapp_message(phone_full, "⚠️ Email invalide. Entrez un email valide ou tapez *non* :")
+            send_whatsapp(phone_full, "⚠️ Email invalide. Tapez *non* pour passer")
             return
-        
         conv["data"] = data
         conv["state"] = State.DEVIS_ADRESSE
         save_conv(phone, conv)
-        
-        email_txt = data["client_email"] if data["client_email"] else "Aucun"
-        send_whatsapp_message(phone_full, f"""✅ Email : *{email_txt}*
+        send_whatsapp(phone_full, """*Étape 4/6* - Adresse chantier (optionnel)
 
-━━━━━━━━━━━━━━━━━━
-*Étape 4/6* - Adresse chantier
-━━━━━━━━━━━━━━━━━━
-
-Quelle est l'*adresse du chantier* ?
-
-_Tapez *non* si pas d'adresse spécifique_""")
+Quelle est l'*adresse* ?
+_Tapez *non* pour passer_""")
         return
     
     # Étape 4: Adresse
     if state == State.DEVIS_ADRESSE:
-        if msg_lower in ["non", "no", "pas", "aucun", "-", "n"]:
+        if msg_lower in ["non", "no", "-", "passer"]:
             data["client_adresse"] = ""
         else:
             data["client_adresse"] = msg
-        
         conv["data"] = data
-        conv["state"] = State.DEVIS_TITRE_PROJET
+        conv["state"] = State.DEVIS_PROJET
         save_conv(phone, conv)
-        
-        adresse_txt = data["client_adresse"] if data["client_adresse"] else "Non spécifiée"
-        send_whatsapp_message(phone_full, f"""✅ Adresse : *{adresse_txt}*
-
-━━━━━━━━━━━━━━━━━━
-*Étape 5/6* - Titre du projet
-━━━━━━━━━━━━━━━━━━
+        send_whatsapp(phone_full, """*Étape 5/6* - Nom du projet
 
 Quel est le *titre du projet* ?
 
 _Exemple: Rénovation salle de bain_""")
         return
     
-    # Étape 5: Titre projet
-    if state == State.DEVIS_TITRE_PROJET:
+    # Étape 5: Projet
+    if state == State.DEVIS_PROJET:
         if len(msg) < 3:
-            send_whatsapp_message(phone_full, "❌ *Le titre est obligatoire*\n\nEntrez un titre pour le projet :")
+            send_whatsapp(phone_full, "❌ Le titre doit contenir au moins 3 caractères.")
             return
-        
         data["titre_projet"] = msg
         conv["data"] = data
         conv["state"] = State.DEVIS_PRESTATIONS
         save_conv(phone, conv)
-        
-        send_whatsapp_message(phone_full, f"""✅ Projet : *{msg}*
+        send_whatsapp(phone_full, f"""✅ Projet : *{msg}*
 
-━━━━━━━━━━━━━━━━━━
 *Étape 6/6* - Prestations
-━━━━━━━━━━━━━━━━━━
 
-Décrivez les *prestations avec les prix* :
+Décrivez les *travaux avec les prix* :
 
 _Exemples:_
-• _Carrelage 30m² à 50€/m²_
-• _Peinture salon 800€_
-• _2 fenêtres à 350€ pièce_""")
+• _Carrelage 30m² à 50€_
+• _Peinture forfait 800€_
+
+_Envoyez tout en un message_""")
         return
     
     # Étape 6: Prestations
     if state == State.DEVIS_PRESTATIONS:
         prestations = parse_prestations_ia(msg)
-        
         if not prestations:
-            send_whatsapp_message(phone_full, """⚠️ Je n'ai pas compris les prestations.
-
-Décrivez avec le format :
-• _Description + quantité + prix_
-
-Exemple: *Carrelage 30m² à 50€*""")
+            send_whatsapp(phone_full, "⚠️ Je n'ai pas compris.\n\nExemple: *Carrelage 30m² à 50€*")
             return
-        
-        # Vérifier qu'il y a au moins un prix
-        has_price = any(p.get("prix_unitaire", 0) > 0 for p in prestations)
-        if not has_price:
-            send_whatsapp_message(phone_full, "❌ *Indiquez le prix*\n\nExemple: _Carrelage 30m² à 50€_")
+        if not any(p.get("prix_unitaire", 0) > 0 for p in prestations):
+            send_whatsapp(phone_full, "❌ *Indiquez le prix !*")
             return
         
         data["prestations"] = prestations
@@ -4094,647 +4109,531 @@ Exemple: *Carrelage 30m² à 50€*""")
         conv["state"] = State.DEVIS_OPTIONS
         save_conv(phone, conv)
         
-        # Calculer le total
         total = sum(p.get("quantite", 1) * p.get("prix_unitaire", 0) for p in prestations)
-        
-        # Afficher les prestations
-        presta_txt = ""
-        for p in prestations:
-            ligne_total = p.get("quantite", 1) * p.get("prix_unitaire", 0)
-            presta_txt += f"• {p.get('description')} ({p.get('quantite')} {p.get('unite')}) = {ligne_total:.0f}€\n"
-        
-        send_whatsapp_message(phone_full, f"""✅ *Prestations enregistrées*
+        presta_txt = "\n".join([f"• {p['description']} = {p['quantite']*p['prix_unitaire']:.0f}€" for p in prestations])
+        send_whatsapp(phone_full, f"""✅ *Prestations OK*
 
 {presta_txt}
+
 💰 *Total HT : {total:.2f}€*
 
 ━━━━━━━━━━━━━━━━━━
-*Options* (facultatif)
-━━━━━━━━━━━━━━━━━━
+*OPTIONS* (facultatif)
 
-• Tapez *remise 10* pour 10% de remise
-• Tapez *acompte 30* pour 30% d'acompte
-• Tapez *ok* pour générer directement""")
+*1.* 🏷️ Remise
+*2.* 💰 Acompte
+*3.* ➡️ Générer le devis""")
         return
     
-    # Options (remise, acompte)
+    # Options
     if state == State.DEVIS_OPTIONS:
-        
-        if "remise" in msg_lower:
-            num = re.search(r'(\d+)', msg_lower)
-            if num and 0 < int(num.group(1)) <= 100:
-                data["remise"] = int(num.group(1))
-                conv["data"] = data
-                save_conv(phone, conv)
-                send_whatsapp_message(phone_full, f"""✅ *Remise {data['remise']}% ajoutée*
-
-• Tapez *acompte 30* pour demander un acompte
-• Tapez *ok* pour générer le devis""")
-            else:
-                send_whatsapp_message(phone_full, "⚠️ Tapez *remise* suivi d'un pourcentage\n\nExemple: *remise 10*")
-            return
-        
-        if "acompte" in msg_lower:
-            num = re.search(r'(\d+)', msg_lower)
-            if num and 0 < int(num.group(1)) <= 100:
-                data["acompte"] = int(num.group(1))
-                conv["data"] = data
-                save_conv(phone, conv)
-                send_whatsapp_message(phone_full, f"""✅ *Acompte {data['acompte']}% ajouté*
-
-Tapez *ok* pour générer le devis""")
-            else:
-                send_whatsapp_message(phone_full, "⚠️ Tapez *acompte* suivi d'un pourcentage\n\nExemple: *acompte 30*")
-            return
-        
-        if msg_lower in ["ok", "oui", "go", "valider", "générer", "generer", "confirmer"]:
-            # Afficher le récap
-            conv["state"] = State.DEVIS_RECAP
+        if msg_lower in ["1", "remise"]:
+            conv["state"] = State.DEVIS_REMISE
             save_conv(phone, conv)
-            
-            # Calculer les totaux
-            total_ht = sum(p.get("quantite", 1) * p.get("prix_unitaire", 0) for p in data.get("prestations", []))
-            
-            if data.get("remise"):
-                total_ht = total_ht * (1 - data["remise"] / 100)
-            
-            # Récap
-            msg = f"""📋 *RÉCAPITULATIF*
-
-━━━━━━━━━━━━━━━━━━
-👤 *Client*
-━━━━━━━━━━━━━━━━━━
-Nom : {data.get('client_nom')}
-Tél : {data.get('client_tel')}
-Email : {data.get('client_email') or 'Non renseigné'}
-Adresse : {data.get('client_adresse') or 'Non renseignée'}
-
-━━━━━━━━━━━━━━━━━━
-📝 *Projet*
-━━━━━━━━━━━━━━━━━━
-{data.get('titre_projet')}
-
-━━━━━━━━━━━━━━━━━━
-💰 *Prestations*
-━━━━━━━━━━━━━━━━━━
-"""
-            for p in data.get("prestations", []):
-                ligne = p.get("quantite", 1) * p.get("prix_unitaire", 0)
-                msg += f"• {p.get('description')} = {ligne:.0f}€\n"
-            
-            if data.get("remise"):
-                msg += f"\n🏷️ Remise : -{data['remise']}%"
-            if data.get("acompte"):
-                msg += f"\n📅 Acompte demandé : {data['acompte']}%"
-            
-            msg += f"""
-
-━━━━━━━━━━━━━━━━━━
-*TOTAL HT : {total_ht:.2f}€*
-━━━━━━━━━━━━━━━━━━
-
-✅ Tapez *oui* pour générer
-❌ Tapez *non* pour annuler"""
-            
-            send_whatsapp_message(phone_full, msg)
+            send_whatsapp(phone_full, "🏷️ *REMISE*\n\nQuel pourcentage ? (ex: 10)")
             return
-        
-        send_whatsapp_message(phone_full, """Tapez :
-• *remise 10* pour une remise
-• *acompte 30* pour un acompte  
-• *ok* pour générer""")
+        if msg_lower in ["2", "acompte"]:
+            conv["state"] = State.DEVIS_ACOMPTE
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "💰 *ACOMPTE*\n\n*1.* 30%\n*2.* 40%\n*3.* 50%\n*4.* Autre")
+            return
+        if msg_lower in ["3", "generer", "générer", "passer", "ok"]:
+            return afficher_recap_devis(phone, conv)
+        send_whatsapp(phone_full, "Tapez *1*, *2* ou *3*")
         return
     
-    # Confirmation récap
+    # Remise
+    if state == State.DEVIS_REMISE:
+        num = re.search(r'(\d+)', msg)
+        if num and 0 < int(num.group(1)) <= 50:
+            data["remise"] = int(num.group(1))
+            conv["data"] = data
+            conv["state"] = State.DEVIS_OPTIONS
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, f"✅ Remise {data['remise']}% ajoutée !\n\n*1.* Remise *2.* Acompte *3.* Générer")
+        else:
+            send_whatsapp(phone_full, "⚠️ Entre 1 et 50%")
+        return
+    
+    # Acompte
+    if state == State.DEVIS_ACOMPTE:
+        taux = {"1": 30, "2": 40, "3": 50}.get(msg_lower, 0)
+        if not taux:
+            num = re.search(r'(\d+)', msg)
+            taux = int(num.group(1)) if num else 0
+        if 0 < taux <= 100:
+            data["acompte"] = taux
+            conv["data"] = data
+            save_conv(phone, conv)
+            return afficher_recap_devis(phone, conv)
+        send_whatsapp(phone_full, "⚠️ Entre 1 et 100%")
+        return
+    
+    # Récap
     if state == State.DEVIS_RECAP:
-        if msg_lower in ["oui", "yes", "ok", "confirmer", "valider", "1"]:
-            send_whatsapp_message(phone_full, "⏳ *Génération en cours...*")
-            
-            result = generer_devis_whatsapp(phone, data)
-            
+        if msg_lower in ["1", "oui", "ok", "valider", "confirmer"]:
+            send_whatsapp(phone_full, "⏳ *Génération en cours...*")
+            result = generer_devis_complet(phone, data)
             if result.get("success"):
-                # Envoyer le PDF
-                send_whatsapp_document(phone_full, result["pdf_url"], 
-                    f"✅ *Devis {result['numero']}*\n\n💰 Total TTC : {result['total_ttc']:.2f}€")
-                
-                # Stocker pour l'envoi
-                data["devis_genere"] = result
-                conv["data"] = data
+                send_whatsapp_document(phone_full, result["pdf_url"], f"✅ *Devis {result['numero']}*\n💰 {result['total_ttc']:.2f}€ TTC")
+                conv["data"]["devis_genere"] = result
                 conv["state"] = State.DEVIS_GENERE
                 save_conv(phone, conv)
-                
-                # Options
-                email_txt = f" ({result['client_email']})" if result.get("client_email") else ""
-                send_whatsapp_message(phone_full, f"""📤 *Que faire maintenant ?*
+                send_whatsapp(phone_full, f"""📤 *Que faire ?*
 
-*1.* Envoyer par email{email_txt}
-*2.* Nouveau devis
-*3.* Créer facture d'acompte
-*4.* Retour au menu""")
+*1.* 📱 Envoyer au client ({result.get('client_tel','')})
+*2.* 📧 Envoyer par email
+*3.* 📝 Nouveau devis
+*4.* 🏠 Menu""")
             else:
-                send_whatsapp_message(phone_full, f"❌ Erreur : {result.get('error')}\n\nTapez *menu* pour recommencer")
+                send_whatsapp(phone_full, f"❌ Erreur : {result.get('error')}")
                 reset_conv(phone)
             return
-        
-        if msg_lower in ["non", "no", "annuler", "0"]:
+        if msg_lower in ["2", "modifier"]:
+            conv["state"] = State.DEVIS_NOM
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "✏️ Quel est le nom du client ?")
+            return
+        if msg_lower in ["3", "annuler"]:
             reset_conv(phone)
-            send_whatsapp_message(phone_full, "❌ *Devis annulé*")
+            send_whatsapp(phone_full, "❌ Annulé")
             send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
             return
-        
-        send_whatsapp_message(phone_full, "Tapez *oui* pour confirmer ou *non* pour annuler")
+        send_whatsapp(phone_full, "*1.* Valider *2.* Modifier *3.* Annuler")
         return
     
     # Après génération devis
     if state == State.DEVIS_GENERE:
         devis = data.get("devis_genere", {})
-        
-        if msg_lower in ["1", "email", "envoyer"]:
-            if devis.get("client_email"):
-                send_whatsapp_message(phone_full, f"📧 Envoi à {devis['client_email']}...")
-                
-                html = f"""<p>Bonjour {devis.get('client_nom', '')},</p>
-<p>Veuillez trouver ci-joint votre devis n° <strong>{devis['numero']}</strong>.</p>
-<p>Montant TTC : <strong>{devis['total_ttc']:.2f}€</strong></p>
-<p>N'hésitez pas à nous contacter pour toute question.</p>
-<p>Cordialement</p>"""
-                
-                if send_email_with_pdf(devis["client_email"], f"Devis {devis['numero']}", html, devis["pdf_url"], f"{devis['numero']}.pdf"):
-                    send_whatsapp_message(phone_full, f"✅ *Email envoyé à {devis['client_email']}*")
-                else:
-                    send_whatsapp_message(phone_full, "❌ Erreur d'envoi")
-                
-                reset_conv(phone)
-                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+        if msg_lower in ["1", "whatsapp", "envoyer"]:
+            client_tel = devis.get("client_tel", "")
+            if client_tel:
+                send_whatsapp_document(f"+{normalize_phone(client_tel)}", devis["pdf_url"], f"Bonjour,\n\nVoici votre devis n° {devis['numero']}\nMontant : {devis['total_ttc']:.2f}€ TTC\n\nCordialement")
+                send_whatsapp(phone_full, f"✅ Devis envoyé à {client_tel} !")
             else:
-                conv["state"] = State.DEVIS_ENVOI_EMAIL
-                save_conv(phone, conv)
-                send_whatsapp_message(phone_full, "📧 Entrez l'adresse email :")
+                send_whatsapp(phone_full, "❌ Pas de numéro client")
             return
-        
-        if msg_lower in ["2", "nouveau"]:
-            conv["state"] = State.DEVIS_NOM_CLIENT
+        if msg_lower in ["2", "email"]:
+            client_email = devis.get("client_email", "")
+            if client_email:
+                html = f"<p>Bonjour,</p><p>Veuillez trouver ci-joint votre devis n° <strong>{devis['numero']}</strong>.</p><p>Montant : <strong>{devis['total_ttc']:.2f}€ TTC</strong></p><p>Cordialement</p>"
+                if send_email_with_pdf(client_email, f"Devis {devis['numero']}", html, devis["pdf_url"], f"{devis['numero']}.pdf"):
+                    send_whatsapp(phone_full, f"✅ Email envoyé à {client_email} !")
+                else:
+                    send_whatsapp(phone_full, "❌ Erreur envoi email")
+            else:
+                send_whatsapp(phone_full, "❌ Pas d'email client")
+            return
+        if msg_lower in ["3", "nouveau"]:
+            conv["state"] = State.DEVIS_NOM
             conv["data"] = {}
             save_conv(phone, conv)
-            send_whatsapp_message(phone_full, """📝 *NOUVEAU DEVIS*
-
-━━━━━━━━━━━━━━━━━━
-*Étape 1/6* - Nom du client
-━━━━━━━━━━━━━━━━━━
-
-Quel est le *nom du client* ?""")
+            send_whatsapp(phone_full, "📝 *NOUVEAU DEVIS*\n\nQuel est le nom du client ?")
             return
-        
-        if msg_lower in ["3", "acompte", "facture"]:
-            # Récupérer les infos du devis
-            devis_list = get_devis_avec_acomptes(phone)
-            devis_info = next((d for d in devis_list if d["numero"] == devis["numero"]), None)
-            
-            if devis_info:
-                data["selected_devis"] = devis_info
-                conv["data"] = data
-                conv["state"] = State.FACTURE_TAUX_ACOMPTE
-                save_conv(phone, conv)
-                send_whatsapp_message(phone_full, """🧾 *FACTURE D'ACOMPTE*
-
-Quel pourcentage d'acompte ?
-
-_Exemple: 30_""")
-            else:
-                send_whatsapp_message(phone_full, "❌ Devis non trouvé. Tapez *menu*")
-            return
-        
         if msg_lower in ["4", "menu"]:
             reset_conv(phone)
             send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
             return
-        
-        send_whatsapp_message(phone_full, "Tapez *1*, *2*, *3* ou *4*")
         return
     
-    # Envoi email devis
-    if state == State.DEVIS_ENVOI_EMAIL:
-        if "@" not in msg or "." not in msg:
-            send_whatsapp_message(phone_full, "⚠️ Email invalide. Réessayez :")
-            return
-        
-        devis = data.get("devis_genere", {})
-        send_whatsapp_message(phone_full, f"📧 Envoi à {msg}...")
-        
-        html = f"""<p>Bonjour {devis.get('client_nom', '')},</p>
-<p>Veuillez trouver ci-joint votre devis n° <strong>{devis['numero']}</strong>.</p>
-<p>Montant TTC : <strong>{devis['total_ttc']:.2f}€</strong></p>
-<p>Cordialement</p>"""
-        
-        if send_email_with_pdf(msg, f"Devis {devis['numero']}", html, devis["pdf_url"], f"{devis['numero']}.pdf"):
-            send_whatsapp_message(phone_full, f"✅ *Email envoyé à {msg}*")
-        else:
-            send_whatsapp_message(phone_full, "❌ Erreur d'envoi")
-        
-        reset_conv(phone)
-        send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
-        return
+    # === FLOW FACTURE ===
     
-    # =========================================================================
-    # FLOW FACTURE
-    # =========================================================================
-    
-    # Choix du devis
-    if state == State.FACTURE_LISTE_DEVIS:
+    if state == State.FACTURE_LISTE:
         devis_list = data.get("devis_list", [])
-        selected = None
-        
-        # Par numéro (1, 2, 3...)
-        num = re.search(r'^(\d+)$', msg_lower)
+        num = re.search(r'^(\d+)$', msg)
         if num and 1 <= int(num.group(1)) <= len(devis_list):
             selected = devis_list[int(num.group(1)) - 1]
-        
-        # Par numéro de devis
-        if not selected:
-            for d in devis_list:
-                if msg.upper() in d.get("numero", ""):
-                    selected = d
-                    break
-        
-        if not selected:
-            send_whatsapp_message(phone_full, "⚠️ Devis non trouvé.\n\nTapez le numéro (1, 2, 3...)")
+            if selected.get("entierement_facture"):
+                send_whatsapp(phone_full, "⚠️ Ce devis est déjà facturé.\n\nTapez *menu*")
+                return
+            
+            data["selected_devis"] = selected
+            conv["data"] = data
+            
+            # Si acompte en attente
+            if selected.get("acompte_en_attente", 0) > 0:
+                conv["state"] = State.FACTURE_ACOMPTE_PAYE
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, f"""📄 *{selected['numero']}*
+
+⏳ Acompte de {selected['acompte_en_attente']:.0f}€ en attente
+
+Le client a payé ?
+
+*1.* ✅ Oui, il a payé
+*2.* 📱 Relancer le client
+*3.* 📄 Facture finale quand même""")
+                return
+            
+            # Si acompte déjà payé
+            if selected.get("acompte_paye", 0) > 0:
+                conv["state"] = State.FACTURE_TYPE
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, f"""📄 *{selected['numero']}*
+
+✅ Acompte payé : {selected['acompte_paye']:.0f}€
+💰 Reste : {selected['reste_a_facturer']:.0f}€
+
+*1.* 📄 Facture finale ({selected['reste_a_facturer']:.0f}€)
+*2.* ↩️ Retour""")
+                return
+            
+            # Pas d'acompte
+            conv["state"] = State.FACTURE_TYPE
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, f"""📄 *{selected['numero']}*
+💰 Total : {selected['total_ttc']:.0f}€
+
+*1.* 💰 Facture d'acompte
+*2.* 📄 Facture totale (100%)""")
             return
+        send_whatsapp(phone_full, "⚠️ Numéro invalide. Tapez 1, 2, 3...")
+        return
+    
+    # Acompte payé?
+    if state == State.FACTURE_ACOMPTE_PAYE:
+        selected = data.get("selected_devis", {})
+        if msg_lower in ["1", "oui", "paye"]:
+            conv["state"] = State.FACTURE_ACOMPTE_MODE
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "💳 *Mode de paiement ?*\n\n*1.* Espèces\n*2.* Virement\n*3.* CB\n*4.* Chèque")
+            return
+        if msg_lower in ["2", "relancer"]:
+            client_tel = selected.get("client_tel", "")
+            if client_tel:
+                send_whatsapp(f"+{normalize_phone(client_tel)}", f"Bonjour,\n\nPetit rappel pour l'acompte de {selected['acompte_en_attente']:.0f}€.\n\nMerci !")
+                send_whatsapp(phone_full, f"✅ Relance envoyée à {client_tel}")
+            reset_conv(phone)
+            send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+            return
+        if msg_lower in ["3", "finale"]:
+            conv["state"] = State.FACTURE_TYPE
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, f"*1.* Facture finale ({selected['reste_a_facturer']:.0f}€)")
+            return
+        return
+    
+    # Mode paiement
+    if state == State.FACTURE_ACOMPTE_MODE:
+        selected = data.get("selected_devis", {})
+        modes = {"1": "especes", "2": "virement", "3": "carte", "4": "cheque"}
+        mode = modes.get(msg_lower, "virement")
+        
+        # Marquer comme payé
+        for f in selected.get("factures_acompte", []):
+            if not f.get("paye"):
+                marquer_facture_payee(f["numero"], phone, mode)
+        
+        # Mettre à jour
+        selected["acompte_paye"] = selected.get("acompte_total", 0)
+        selected["acompte_en_attente"] = 0
+        selected["reste_a_facturer"] = selected["total_ttc"] - selected["acompte_paye"]
         
         data["selected_devis"] = selected
         conv["data"] = data
+        conv["state"] = State.FACTURE_TYPE
+        save_conv(phone, conv)
         
-        # Vérifier l'état du devis
-        if selected.get("facture_finale"):
-            send_whatsapp_message(phone_full, f"""⚠️ *Ce devis est déjà facturé*
+        send_whatsapp(phone_full, f"""✅ Acompte marqué payé !
 
-Facture : {selected['facture_finale'].get('numero_facture')}
+Reste à facturer : {selected['reste_a_facturer']:.0f}€
 
-Tapez *menu* pour revenir""")
-            return
-        
-        if selected.get("acompte_total", 0) > 0:
-            # Il y a un acompte
-            if selected.get("acompte_paye"):
-                # Acompte payé → proposer facture finale
-                conv["state"] = State.FACTURE_TYPE
-                save_conv(phone, conv)
-                
-                send_whatsapp_message(phone_full, f"""💰 *Acompte de {selected['acompte_total']:.2f}€ déjà payé*
-
-Reste à facturer : *{selected['reste_a_payer']:.2f}€*
-
-*1.* Générer la facture finale (solde)
-*2.* Annuler""")
-            else:
-                # Acompte non payé → demander si payé
-                conv["state"] = State.FACTURE_TYPE
-                save_conv(phone, conv)
-                
-                send_whatsapp_message(phone_full, f"""⏳ *Acompte de {selected['acompte_total']:.2f}€ en attente*
-
-Le client a-t-il payé l'acompte ?
-
-*1.* Oui, marquer comme payé et générer facture finale
-*2.* Non, l'acompte n'est pas encore payé
-*3.* Annuler""")
-        else:
-            # Pas d'acompte → choix du type
-            conv["state"] = State.FACTURE_TYPE
-            save_conv(phone, conv)
-            
-            send_whatsapp_message(phone_full, f"""📄 *Devis sélectionné*
-
-{selected['numero']}
-👤 {selected['client']}
-💰 {selected['total_ttc']:.2f}€
-
-━━━━━━━━━━━━━━━━━━
-Quel type de facture ?
-━━━━━━━━━━━━━━━━━━
-
-*1.* Facture d'acompte
-*2.* Facture complète (100%)
-*3.* Annuler""")
+*1.* Facture finale
+*2.* Menu""")
         return
     
-    # Type de facture
+    # Type facture
     if state == State.FACTURE_TYPE:
         selected = data.get("selected_devis", {})
         
-        # Cas: acompte non payé
-        if selected.get("acompte_total", 0) > 0 and not selected.get("acompte_paye"):
-            if msg_lower in ["1", "oui"]:
-                # Marquer comme payé
-                for f in selected.get("acompte_factures", []):
-                    marquer_facture_payee(f["numero"], phone)
-                
-                send_whatsapp_message(phone_full, "✅ *Acompte marqué comme payé*\n\n⏳ Génération de la facture finale...")
-                
-                # Mettre à jour selected
-                selected["acompte_paye"] = True
-                data["selected_devis"] = selected
-                
-                result = generer_facture_whatsapp(phone, selected, "finale")
-                
-                if result.get("success"):
-                    send_whatsapp_document(phone_full, result["pdf_url"],
-                        f"✅ *Facture {result['numero']}*\n\n💰 Solde : {result['total_ttc']:.2f}€")
-                    
-                    data["facture_generee"] = result
-                    conv["data"] = data
-                    conv["state"] = State.FACTURE_GENEREE
-                    save_conv(phone, conv)
-                    
-                    email_txt = f" ({result['client_email']})" if result.get("client_email") else ""
-                    send_whatsapp_message(phone_full, f"""📤 *Que faire ?*
-
-*1.* Envoyer par email{email_txt}
-*2.* Marquer comme payée
-*3.* Menu""")
-                else:
-                    send_whatsapp_message(phone_full, f"❌ Erreur : {result.get('error')}")
-                    reset_conv(phone)
-                return
-            
-            if msg_lower in ["2", "non"]:
-                send_whatsapp_message(phone_full, """⏳ *L'acompte n'est pas encore payé*
-
-Attendez le paiement avant de générer la facture finale.
-
-Tapez *menu* pour revenir""")
-                reset_conv(phone)
-                return
-            
-            if msg_lower in ["3", "annuler"]:
-                reset_conv(phone)
-                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
-                return
-        
-        # Cas: acompte payé → facture finale
-        if selected.get("acompte_paye"):
-            if msg_lower in ["1", "oui", "finale"]:
-                send_whatsapp_message(phone_full, "⏳ *Génération de la facture finale...*")
-                
-                result = generer_facture_whatsapp(phone, selected, "finale")
-                
-                if result.get("success"):
-                    send_whatsapp_document(phone_full, result["pdf_url"],
-                        f"✅ *Facture {result['numero']}*\n\n💰 Solde : {result['total_ttc']:.2f}€")
-                    
-                    data["facture_generee"] = result
-                    conv["data"] = data
-                    conv["state"] = State.FACTURE_GENEREE
-                    save_conv(phone, conv)
-                    
-                    email_txt = f" ({result['client_email']})" if result.get("client_email") else ""
-                    send_whatsapp_message(phone_full, f"""📤 *Que faire ?*
-
-*1.* Envoyer par email{email_txt}
-*2.* Marquer comme payée
-*3.* Menu""")
-                else:
-                    send_whatsapp_message(phone_full, f"❌ Erreur : {result.get('error')}")
-                    reset_conv(phone)
-                return
-            
-            if msg_lower in ["2", "annuler"]:
-                reset_conv(phone)
-                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
-                return
-        
-        # Cas: pas d'acompte → choix type
-        if msg_lower in ["1", "acompte"]:
-            conv["state"] = State.FACTURE_TAUX_ACOMPTE
+        if msg_lower in ["1", "acompte"] and selected.get("acompte_paye", 0) == 0:
+            conv["state"] = State.FACTURE_ACOMPTE_TAUX
             save_conv(phone, conv)
-            send_whatsapp_message(phone_full, """🧾 *FACTURE D'ACOMPTE*
+            send_whatsapp(phone_full, f"""💰 *ACOMPTE*
 
-Quel pourcentage d'acompte ?
+Total : {selected['total_ttc']:.0f}€
 
-_Exemple: 30_""")
+*1.* 30% ({selected['total_ttc']*0.3:.0f}€)
+*2.* 40% ({selected['total_ttc']*0.4:.0f}€)
+*3.* 50% ({selected['total_ttc']*0.5:.0f}€)
+*4.* Autre""")
             return
         
-        if msg_lower in ["2", "complete", "complète", "100"]:
-            send_whatsapp_message(phone_full, "⏳ *Génération de la facture...*")
-            
-            result = generer_facture_whatsapp(phone, selected, "complete")
-            
+        if msg_lower in ["1", "2", "finale", "totale"]:
+            send_whatsapp(phone_full, "⏳ *Génération...*")
+            result = generer_facture_complete(phone, selected, "finale" if selected.get("acompte_paye", 0) > 0 else "complete")
             if result.get("success"):
-                send_whatsapp_document(phone_full, result["pdf_url"],
-                    f"✅ *Facture {result['numero']}*\n\n💰 Total : {result['total_ttc']:.2f}€")
-                
-                data["facture_generee"] = result
-                conv["data"] = data
-                conv["state"] = State.FACTURE_GENEREE
+                send_whatsapp_document(phone_full, result["pdf_url"], f"✅ *Facture {result['numero']}*\n💰 {result['total_ttc']:.2f}€")
+                conv["data"]["facture_generee"] = result
+                conv["state"] = State.FACTURE_GENERE
                 save_conv(phone, conv)
-                
-                email_txt = f" ({result['client_email']})" if result.get("client_email") else ""
-                send_whatsapp_message(phone_full, f"""📤 *Que faire ?*
-
-*1.* Envoyer par email{email_txt}
-*2.* Marquer comme payée
-*3.* Menu""")
+                send_whatsapp(phone_full, "*1.* 📱 Envoyer WhatsApp\n*2.* 📧 Envoyer email\n*3.* ✅ Marquer payée\n*4.* 🏠 Menu")
             else:
-                send_whatsapp_message(phone_full, f"❌ Erreur : {result.get('error')}")
+                send_whatsapp(phone_full, f"❌ Erreur : {result.get('error')}")
                 reset_conv(phone)
             return
-        
-        if msg_lower in ["3", "annuler"]:
-            reset_conv(phone)
-            send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
-            return
-        
-        send_whatsapp_message(phone_full, "Tapez *1*, *2* ou *3*")
         return
     
     # Taux acompte
-    if state == State.FACTURE_TAUX_ACOMPTE:
-        num = re.search(r'(\d+)', msg_lower)
-        if not num or int(num.group(1)) <= 0 or int(num.group(1)) > 100:
-            send_whatsapp_message(phone_full, "⚠️ Entrez un pourcentage entre 1 et 100\n\nExemple: *30*")
-            return
-        
-        taux = int(num.group(1))
+    if state == State.FACTURE_ACOMPTE_TAUX:
         selected = data.get("selected_devis", {})
+        taux = {"1": 30, "2": 40, "3": 50}.get(msg_lower, 0)
+        if not taux:
+            num = re.search(r'(\d+)', msg)
+            taux = int(num.group(1)) if num else 0
         
-        send_whatsapp_message(phone_full, f"⏳ *Génération facture acompte {taux}%...*")
-        
-        result = generer_facture_whatsapp(phone, selected, "acompte", taux)
-        
-        if result.get("success"):
-            send_whatsapp_document(phone_full, result["pdf_url"],
-                f"✅ *Facture {result['numero']}*\n\n💰 Acompte {taux}% : {result['total_ttc']:.2f}€")
-            
-            data["facture_generee"] = result
-            conv["data"] = data
-            conv["state"] = State.FACTURE_GENEREE
-            save_conv(phone, conv)
-            
-            email_txt = f" ({result['client_email']})" if result.get("client_email") else ""
-            send_whatsapp_message(phone_full, f"""📤 *Que faire ?*
-
-*1.* Envoyer par email{email_txt}
-*2.* Marquer comme payée
-*3.* Menu""")
+        if 1 <= taux <= 90:
+            send_whatsapp(phone_full, "⏳ *Génération...*")
+            result = generer_facture_complete(phone, selected, "acompte", taux)
+            if result.get("success"):
+                send_whatsapp_document(phone_full, result["pdf_url"], f"✅ *Facture acompte {result['numero']}*\n💰 {result['total_ttc']:.2f}€ ({taux}%)")
+                conv["data"]["facture_generee"] = result
+                conv["state"] = State.FACTURE_GENERE
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, "*1.* 📱 Envoyer WhatsApp\n*2.* 📧 Envoyer email\n*3.* ✅ Marquer payée\n*4.* 🏠 Menu")
+            else:
+                send_whatsapp(phone_full, f"❌ Erreur")
+                reset_conv(phone)
         else:
-            send_whatsapp_message(phone_full, f"❌ Erreur : {result.get('error')}")
-            reset_conv(phone)
+            send_whatsapp(phone_full, "⚠️ Entre 1 et 90%")
         return
     
-    # Facture générée
-    if state == State.FACTURE_GENEREE:
+    # Après génération facture
+    if state == State.FACTURE_GENERE:
         facture = data.get("facture_generee", {})
-        
-        if msg_lower in ["1", "email"]:
-            if facture.get("client_email"):
-                send_whatsapp_message(phone_full, f"📧 Envoi à {facture['client_email']}...")
-                
-                html = f"""<p>Bonjour {facture.get('client_nom', '')},</p>
-<p>Veuillez trouver ci-joint votre facture n° <strong>{facture['numero']}</strong>.</p>
-<p>Montant : <strong>{facture['total_ttc']:.2f}€</strong></p>
-<p>Cordialement</p>"""
-                
-                if send_email_with_pdf(facture["client_email"], f"Facture {facture['numero']}", html, facture["pdf_url"], f"{facture['numero']}.pdf"):
-                    send_whatsapp_message(phone_full, f"✅ *Email envoyé à {facture['client_email']}*")
-                else:
-                    send_whatsapp_message(phone_full, "❌ Erreur d'envoi")
-            else:
-                conv["state"] = State.FACTURE_ENVOI_EMAIL
-                save_conv(phone, conv)
-                send_whatsapp_message(phone_full, "📧 Entrez l'adresse email :")
-                return
-            
+        if msg_lower in ["1", "whatsapp"]:
+            client_tel = facture.get("client_tel", "")
+            if client_tel:
+                send_whatsapp_document(f"+{normalize_phone(client_tel)}", facture["pdf_url"], f"Voici votre facture n° {facture['numero']}\nMontant : {facture['total_ttc']:.2f}€")
+                send_whatsapp(phone_full, f"✅ Envoyé à {client_tel}")
+            return
+        if msg_lower in ["2", "email"]:
+            client_email = facture.get("client_email", "")
+            if client_email:
+                html = f"<p>Bonjour,</p><p>Voici votre facture n° <strong>{facture['numero']}</strong>.</p><p>Montant : <strong>{facture['total_ttc']:.2f}€</strong></p>"
+                send_email_with_pdf(client_email, f"Facture {facture['numero']}", html, facture["pdf_url"], f"{facture['numero']}.pdf")
+                send_whatsapp(phone_full, f"✅ Email envoyé à {client_email}")
+            return
+        if msg_lower in ["3", "payee", "paye"]:
+            marquer_facture_payee(facture["numero"], phone, "virement")
+            send_whatsapp(phone_full, f"✅ {facture['numero']} marquée payée !")
+            return
+        if msg_lower in ["4", "menu"]:
             reset_conv(phone)
             send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
             return
-        
-        if msg_lower in ["2", "payee", "payé", "paye"]:
-            if marquer_facture_payee(facture["numero"], phone):
-                send_whatsapp_message(phone_full, f"✅ *Facture {facture['numero']} marquée comme payée*")
-            else:
-                send_whatsapp_message(phone_full, "❌ Erreur")
-            
-            reset_conv(phone)
-            send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+        return
+    
+    # === FLOW DOCUMENTS ===
+    if state == State.DOCUMENTS_LISTE:
+        docs = data.get("documents", [])
+        num = re.search(r'^(\d+)$', msg)
+        if num and 1 <= int(num.group(1)) <= len(docs):
+            doc = docs[int(num.group(1)) - 1]
+            if doc.get("pdf_url"):
+                send_whatsapp_document(phone_full, doc["pdf_url"], f"📄 {doc['numero']}")
+            send_whatsapp(phone_full, "*1.* 📱 Renvoyer WhatsApp\n*2.* 📧 Renvoyer email\n*3.* 🏠 Menu")
+            data["selected_doc"] = doc
+            conv["data"] = data
+            conv["state"] = State.DOCUMENTS_DETAIL
+            save_conv(phone, conv)
             return
-        
+        send_whatsapp(phone_full, "⚠️ Numéro invalide")
+        return
+    
+    if state == State.DOCUMENTS_DETAIL:
+        doc = data.get("selected_doc", {})
+        if msg_lower in ["1", "whatsapp"]:
+            send_whatsapp(phone_full, "📱 Entrez le numéro de téléphone :")
+            data["waiting_tel"] = True
+            conv["data"] = data
+            save_conv(phone, conv)
+            return
+        if msg_lower in ["2", "email"]:
+            send_whatsapp(phone_full, "📧 Entrez l'email :")
+            data["waiting_email"] = True
+            conv["data"] = data
+            save_conv(phone, conv)
+            return
         if msg_lower in ["3", "menu"]:
             reset_conv(phone)
             send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
             return
         
-        send_whatsapp_message(phone_full, "Tapez *1*, *2* ou *3*")
-        return
-    
-    # Envoi email facture
-    if state == State.FACTURE_ENVOI_EMAIL:
-        if "@" not in msg or "." not in msg:
-            send_whatsapp_message(phone_full, "⚠️ Email invalide. Réessayez :")
+        if data.get("waiting_tel"):
+            tel = re.sub(r'[^0-9+]', '', msg)
+            if len(tel) >= 10:
+                send_whatsapp_document(f"+{normalize_phone(tel)}", doc["pdf_url"], f"Document {doc['numero']}")
+                send_whatsapp(phone_full, f"✅ Envoyé à {tel}")
+                data["waiting_tel"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
             return
         
-        facture = data.get("facture_generee", {})
-        send_whatsapp_message(phone_full, f"📧 Envoi à {msg}...")
-        
-        html = f"""<p>Bonjour,</p>
-<p>Veuillez trouver ci-joint votre facture n° <strong>{facture['numero']}</strong>.</p>
-<p>Montant : <strong>{facture['total_ttc']:.2f}€</strong></p>
-<p>Cordialement</p>"""
-        
-        if send_email_with_pdf(msg, f"Facture {facture['numero']}", html, facture["pdf_url"], f"{facture['numero']}.pdf"):
-            send_whatsapp_message(phone_full, f"✅ *Email envoyé à {msg}*")
-        else:
-            send_whatsapp_message(phone_full, "❌ Erreur d'envoi")
-        
-        reset_conv(phone)
-        send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+        if data.get("waiting_email"):
+            if "@" in msg and "." in msg:
+                html = f"<p>Voici le document {doc['numero']}.</p>"
+                send_email_with_pdf(msg.lower().strip(), f"Document {doc['numero']}", html, doc["pdf_url"], f"{doc['numero']}.pdf")
+                send_whatsapp(phone_full, f"✅ Email envoyé à {msg}")
+                data["waiting_email"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+            return
         return
     
-    # =========================================================================
-    # DOCUMENTS
-    # =========================================================================
+    # Fallback
+    send_whatsapp(phone_full, "🤔 Je n'ai pas compris.\n\nTapez *menu*")
+
+
+def afficher_recap_devis(phone: str, conv: Dict):
+    """Affiche le récapitulatif du devis"""
+    phone_full = f"+{normalize_phone(phone)}"
+    data = conv.get("data", {})
     
-    if state == State.DOCUMENTS_LISTE:
-        docs = data
-        numero = msg.upper().strip()
-        
-        # Chercher le document
-        for d in docs.get("devis", []):
-            if numero in d.get("numero", ""):
-                if d.get("pdf_url"):
-                    send_whatsapp_document(phone_full, d["pdf_url"], f"📤 *{d['numero']}*\n👤 {d['client']}")
-                else:
-                    send_whatsapp_message(phone_full, "❌ PDF non disponible")
-                reset_conv(phone)
-                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
-                return
-        
-        for f in docs.get("factures", []):
-            if numero in f.get("numero", ""):
-                if f.get("pdf_url"):
-                    send_whatsapp_document(phone_full, f["pdf_url"], f"📤 *{f['numero']}*\n👤 {f['client']}")
-                else:
-                    send_whatsapp_message(phone_full, "❌ PDF non disponible")
-                reset_conv(phone)
-                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
-                return
-        
-        send_whatsapp_message(phone_full, "⚠️ Document non trouvé.\n\nTapez *menu* pour revenir")
-        return
+    prestations = data.get("prestations", [])
+    total_ht = sum(p.get("quantite", 1) * p.get("prix_unitaire", 0) for p in prestations)
     
-    # =========================================================================
-    # ÉTAT INCONNU
-    # =========================================================================
+    remise = data.get("remise", 0)
+    if remise:
+        total_ht_apres = total_ht * (1 - remise / 100)
+    else:
+        total_ht_apres = total_ht
     
-    reset_conv(phone)
-    send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+    entreprise = get_entreprise(phone)
+    tva_taux = 20
+    if entreprise:
+        tva_taux = entreprise.get("tva_taux") or 20
+        if entreprise.get("forme_juridique") in ["auto-entrepreneur", "micro-entreprise"]:
+            tva_taux = 0
+    
+    if tva_taux > 0:
+        total_ttc = total_ht_apres * (1 + tva_taux / 100)
+    else:
+        total_ttc = total_ht_apres
+    
+    msg = f"""📋 *RÉCAPITULATIF*
+
+👤 *{data.get('client_nom', '')}*
+📞 {data.get('client_tel', '')}
+"""
+    if data.get("client_email"):
+        msg += f"📧 {data.get('client_email')}\n"
+    if data.get("client_adresse"):
+        msg += f"📍 {data.get('client_adresse')}\n"
+    
+    msg += f"\n🏗️ *{data.get('titre_projet', '')}*\n\n"
+    
+    for p in prestations:
+        ligne = p.get("quantite", 1) * p.get("prix_unitaire", 0)
+        msg += f"• {p['description']} = {ligne:.0f}€\n"
+    
+    msg += f"\n━━━━━━━━━━━━━━━━━━\n"
+    if remise:
+        msg += f"Remise {remise}% : -{total_ht * remise / 100:.0f}€\n"
+    msg += f"*Total HT : {total_ht_apres:.2f}€*\n"
+    if tva_taux > 0:
+        msg += f"TVA {tva_taux}% : {total_ht_apres * tva_taux / 100:.2f}€\n"
+    else:
+        msg += "TVA : Non applicable (art. 293B)\n"
+    msg += f"*TOTAL TTC : {total_ttc:.2f}€*\n"
+    
+    if data.get("acompte"):
+        msg += f"\n💵 Acompte {data['acompte']}% : {total_ttc * data['acompte'] / 100:.2f}€\n"
+    
+    msg += "\n━━━━━━━━━━━━━━━━━━\n*1.* ✅ Valider\n*2.* ✏️ Modifier\n*3.* ❌ Annuler"
+    
+    conv["state"] = State.DEVIS_RECAP
+    save_conv(phone, conv)
+    send_whatsapp(phone_full, msg)
 
 
 # =============================================================================
-# WEBHOOK
+# TRANSCRIPTION AUDIO (Whisper)
+# =============================================================================
+
+def transcribe_audio(audio_url: str) -> str:
+    """Transcrit un message vocal"""
+    if not openai_whisper_client:
+        return ""
+    try:
+        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+            response = requests.get(audio_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        else:
+            response = requests.get(audio_url)
+        if response.status_code != 200:
+            return ""
+        temp_file = f"/tmp/audio_{uuid.uuid4().hex}.ogg"
+        with open(temp_file, "wb") as f:
+            f.write(response.content)
+        with open(temp_file, "rb") as f:
+            transcript = openai_whisper_client.audio.transcriptions.create(model="whisper-1", file=f, language="fr")
+        try:
+            os.remove(temp_file)
+        except:
+            pass
+        return transcript.text.strip()
+    except Exception as e:
+        print(f"❌ Erreur Whisper: {e}")
+        return ""
+
+
+# =============================================================================
+# WEBHOOK PRINCIPAL
 # =============================================================================
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(
     From: str = Form(""),
     Body: str = Form(""),
+    ButtonPayload: Optional[str] = Form(None),
+    ListReply: Optional[str] = Form(None),
     MediaUrl0: Optional[str] = Form(None),
     MediaContentType0: Optional[str] = Form(None),
+    ProfileName: Optional[str] = Form(None),
     MessageSid: Optional[str] = Form(None),
     SmsMessageSid: Optional[str] = Form(None)
 ):
+    """Webhook WhatsApp v6"""
     try:
         phone = From.replace("whatsapp:", "").strip()
         message = Body.strip()
         
-        print(f"📨 WhatsApp: {phone} → {message[:50]}")
-        
         # Anti-doublon
-        sid = MessageSid or SmsMessageSid
-        if sid:
-            if sid in _processed_sids:
-                return {"status": "skip"}
-            _processed_sids[sid] = datetime.now()
-            # Nettoyage
+        msg_sid = MessageSid or SmsMessageSid
+        if msg_sid:
+            if msg_sid in _processed_sids:
+                return {"skip": True}
+            _processed_sids[msg_sid] = datetime.now()
             old = [s for s, t in _processed_sids.items() if (datetime.now() - t).total_seconds() > 300]
             for s in old:
                 del _processed_sids[s]
         
+        # Payload bouton
+        button_payload = None
+        if ButtonPayload:
+            try:
+                payload = json.loads(ButtonPayload) if isinstance(ButtonPayload, str) else ButtonPayload
+                button_payload = payload.get("id") if isinstance(payload, dict) else ButtonPayload
+            except:
+                button_payload = ButtonPayload
+        if ListReply and not button_payload:
+            try:
+                data = json.loads(ListReply) if isinstance(ListReply, str) else ListReply
+                button_payload = data.get("id") if isinstance(data, dict) else ListReply
+            except:
+                button_payload = ListReply
+        
         # Audio
         if MediaUrl0 and MediaContentType0 and "audio" in MediaContentType0.lower():
-            transcribed = transcribe_audio_from_url(MediaUrl0)
+            transcribed = transcribe_audio(MediaUrl0)
             if transcribed:
                 message = transcribed
             else:
-                send_whatsapp_message(f"+{phone}", "🎤 Pas compris. Réessayez ou écrivez.")
-                return {"status": "ok"}
+                send_whatsapp(f"+{normalize_phone(phone)}", "🎤 Message vocal non compris. Écrivez ou réessayez.")
+                return {"status": "audio_error"}
         
-        # Traiter
-        if message:
-            handle_message(phone, message)
-        else:
-            send_whatsapp_template(f"+{phone}", TEMPLATE_MENU_SID)
-        
+        handle_message(phone, message, button_payload)
         return {"status": "ok"}
-        
     except Exception as e:
         print(f"❌ Erreur: {e}")
         import traceback
@@ -4743,32 +4642,19 @@ async def whatsapp_webhook(
 
 
 @app.get("/webhook/whatsapp/test")
-async def test():
-    return {"status": "ok", "version": "v5", "twilio": bool(TWILIO_ACCOUNT_SID), "resend": bool(RESEND_API_KEY)}
+async def test_webhook():
+    return {"status": "ok", "version": "v6"}
 
 
 @app.get("/webhook/whatsapp/sessions")
-async def sessions():
+async def list_sessions():
     return {"total": len(_conversations), "sessions": list(_conversations.keys())}
 
 
 @app.delete("/webhook/whatsapp/sessions/{phone}")
 async def delete_session(phone: str):
     reset_conv(phone)
-    return {"ok": True}
-
-
-# Endpoints API existants
-@app.get("/api/whatsapp/devis/{phone}")
-async def api_devis(phone: str, limit: int = 5):
-    docs = get_documents(phone)
-    return {"devis": docs.get("devis", []), "count": len(docs.get("devis", []))}
-
-
-@app.get("/api/whatsapp/factures/{phone}")
-async def api_factures(phone: str, limit: int = 5):
-    docs = get_documents(phone)
-    return {"factures": docs.get("factures", []), "count": len(docs.get("factures", []))}
+    return {"deleted": phone}
 
 
 if __name__ == "__main__":
