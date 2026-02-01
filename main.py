@@ -3795,24 +3795,40 @@ def generer_facture_complete(phone: str, devis: Dict, type_facture: str, taux_ac
         if entreprise.get("forme_juridique") in ["auto-entrepreneur", "micro-entreprise"]:
             tva_taux = 0
         
-        # Calculs
-        total_ttc_devis = devis.get("total_ttc", 0)
-        total_ht_devis = devis.get("total_ht", 0)
-        acompte_paye = devis.get("acompte_paye", 0)
+        # Calculs - UTILISER total_ttc et total_ht du devis
+        total_ttc_devis = float(devis.get("total_ttc", 0) or 0)
+        total_ht_devis = float(devis.get("total_ht", 0) or 0)
+        acompte_paye = float(devis.get("acompte_paye", 0) or 0)
+        
+        print(f"📊 GÉNÉRATION FACTURE - Type: {type_facture}")
+        print(f"   Devis: {devis.get('numero')} | Total TTC: {total_ttc_devis} | Total HT: {total_ht_devis}")
+        print(f"   Acompte payé: {acompte_paye}")
+        
+        # Récupérer les références des factures d'acompte
+        acompte_refs = []
+        for fac in devis.get("factures_acompte", []):
+            if fac.get("paye"):
+                acompte_refs.append(fac.get("numero", ""))
         
         if type_facture == "acompte":
             numero_facture = f"FAC-ACO-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
             total_ttc = round(total_ttc_devis * taux_acompte / 100, 2)
             total_ht = round(total_ht_devis * taux_acompte / 100, 2)
             description = f"Acompte {taux_acompte}% - {devis.get('titre_projet', 'Devis ' + devis.get('numero', ''))}"
+            acompte_ttc_deja_facture = None
         else:  # finale ou complete
             numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-            total_ttc = round(total_ttc_devis - acompte_paye, 2)
-            total_ht = round(total_ht_devis - (acompte_paye / (1 + tva_taux/100)) if tva_taux > 0 else total_ht_devis - acompte_paye, 2)
+            # Pour facture finale : on facture le TOTAL du devis, et on déduit l'acompte dans l'affichage
+            total_ttc = total_ttc_devis  # Le total reste le total du devis
+            total_ht = total_ht_devis
+            acompte_ttc_deja_facture = acompte_paye if acompte_paye > 0 else None
+            
             if acompte_paye > 0:
-                description = f"Solde - {devis.get('titre_projet', '')} (acompte de {acompte_paye:.2f}€ déduit)"
+                description = f"{devis.get('titre_projet', 'Facture')}"
             else:
                 description = f"{devis.get('titre_projet', 'Facture')}"
+        
+        print(f"   Facture générée: {numero_facture} | TTC: {total_ttc} | HT: {total_ht}")
         
         # Objets
         entreprise_obj = Entreprise(
@@ -3856,6 +3872,8 @@ def generer_facture_complete(phone: str, devis: Dict, type_facture: str, taux_ac
             taux_acompte=taux_acompte if type_facture == "acompte" else None,
             total_ht=total_ht,
             total_ttc=total_ttc,
+            acompte_ttc_deja_facture=acompte_ttc_deja_facture,
+            acompte_references=acompte_refs if acompte_refs else None,
         )
         
         # Générer PDF
@@ -4377,12 +4395,46 @@ Total : {selected['total_ttc']:.0f}€
     # Taux acompte
     if state == State.FACTURE_ACOMPTE_TAUX:
         selected = data.get("selected_devis", {})
-        taux = {"1": 30, "2": 40, "3": 50}.get(msg_lower, 0)
-        if not taux:
-            num = re.search(r'(\d+)', msg)
-            taux = int(num.group(1)) if num else 0
         
-        if 1 <= taux <= 90:
+        # "4" ou "autre" = demander le pourcentage personnalisé
+        if msg_lower in ["4", "autre"]:
+            data["waiting_taux_custom"] = True
+            conv["data"] = data
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "📝 *Entrez le pourcentage souhaité* (ex: 20)")
+            return
+        
+        # Si on attend un taux personnalisé
+        if data.get("waiting_taux_custom"):
+            num = re.search(r'(\d+)', msg)
+            if num:
+                taux = int(num.group(1))
+                if 1 <= taux <= 90:
+                    data["waiting_taux_custom"] = False
+                    conv["data"] = data
+                    save_conv(phone, conv)
+                    
+                    send_whatsapp(phone_full, "⏳ *Génération...*")
+                    result = generer_facture_complete(phone, selected, "acompte", taux)
+                    if result.get("success"):
+                        send_whatsapp_document(phone_full, result["pdf_url"], f"✅ *Facture acompte {result['numero']}*\n💰 {result['total_ttc']:.2f}€ ({taux}%)")
+                        conv["data"]["facture_generee"] = result
+                        conv["state"] = State.FACTURE_GENERE
+                        save_conv(phone, conv)
+                        send_whatsapp(phone_full, "*1.* 📱 Envoyer WhatsApp\n*2.* 📧 Envoyer email\n*3.* ✅ Marquer payée\n*4.* 🏠 Menu")
+                    else:
+                        send_whatsapp(phone_full, f"❌ Erreur")
+                        reset_conv(phone)
+                else:
+                    send_whatsapp(phone_full, "⚠️ Entrez un pourcentage entre 1 et 90")
+            else:
+                send_whatsapp(phone_full, "⚠️ Entrez un nombre (ex: 20)")
+            return
+        
+        # Taux prédéfinis : 1=30%, 2=40%, 3=50%
+        taux = {"1": 30, "2": 40, "3": 50}.get(msg_lower, 0)
+        
+        if taux > 0:
             send_whatsapp(phone_full, "⏳ *Génération...*")
             result = generer_facture_complete(phone, selected, "acompte", taux)
             if result.get("success"):
@@ -4395,7 +4447,7 @@ Total : {selected['total_ttc']:.0f}€
                 send_whatsapp(phone_full, f"❌ Erreur")
                 reset_conv(phone)
         else:
-            send_whatsapp(phone_full, "⚠️ Entre 1 et 90%")
+            send_whatsapp(phone_full, "⚠️ Tapez *1*, *2*, *3* ou *4* (autre)")
         return
     
     # Après génération facture
