@@ -3126,6 +3126,7 @@ def debug_env():
 # - Intégré avec Supabase/Dashboard
 # =============================================================================
 # =============================================================================
+# =============================================================================
 # WEBHOOK WHATSAPP v6 - FLOW COMPLET STRUCTURÉ
 # =============================================================================
 #
@@ -3200,7 +3201,30 @@ _processed_sids: Dict[str, datetime] = {}
 
 
 def normalize_phone(phone: str) -> str:
-    return phone.replace("whatsapp:", "").replace("+", "").replace(" ", "").strip()
+    """Normalise un numéro de téléphone au format international (sans +)"""
+    if not phone:
+        return ""
+    
+    # Nettoyer
+    clean = phone.replace("whatsapp:", "").replace("+", "").replace(" ", "").replace("-", "").replace(".", "").strip()
+    
+    # Si vide après nettoyage
+    if not clean:
+        return ""
+    
+    # Supprimer les 0 en trop au début (ex: 00336... -> 336...)
+    while clean.startswith("00"):
+        clean = clean[1:]
+    
+    # Numéro français commençant par 0 (06, 07, 01, 02, etc.)
+    if clean.startswith("0") and len(clean) == 10:
+        clean = "33" + clean[1:]  # 0612345678 -> 33612345678
+    
+    # Numéro qui commence par 6 ou 7 (français sans indicatif)
+    if len(clean) == 9 and clean[0] in "67":
+        clean = "33" + clean  # 612345678 -> 33612345678
+    
+    return clean
 
 
 def get_conv(phone: str) -> Dict:
