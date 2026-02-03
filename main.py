@@ -3810,23 +3810,114 @@ def generer_facture_complete(phone: str, devis: Dict, type_facture: str, taux_ac
             if fac.get("paye"):
                 acompte_refs.append(fac.get("numero", ""))
         
+        # Récupérer les prestations du devis depuis Supabase
+        prestations_devis = []
+        if supabase_client and devis.get("id"):
+            try:
+                result = supabase_client.table('devis').select('prestations, remise_type, remise_value').eq('id', devis.get("id")).execute()
+                if result.data and len(result.data) > 0:
+                    row = result.data[0]
+                    prestations_raw = row.get("prestations")
+                    if isinstance(prestations_raw, str):
+                        prestations_devis = json.loads(prestations_raw)
+                    elif isinstance(prestations_raw, list):
+                        prestations_devis = prestations_raw
+                    
+                    # Récupérer la remise
+                    remise_type = row.get("remise_type")
+                    remise_value = float(row.get("remise_value") or 0)
+                    print(f"   Prestations récupérées: {len(prestations_devis)} | Remise: {remise_type} {remise_value}")
+            except Exception as e:
+                print(f"   ⚠️ Erreur récupération prestations: {e}")
+        
+        # Calculer le total HT brut (avant remise) depuis les prestations
+        total_ht_brut = 0
+        for p in prestations_devis:
+            qte = float(p.get("quantite", 1) or 1)
+            prix = float(p.get("prix_unitaire", 0) or p.get("prix_unitaire_ht", 0) or 0)
+            total_ht_brut += qte * prix
+        
+        # Si pas de prestations récupérées, utiliser total_ht_devis
+        if total_ht_brut == 0:
+            total_ht_brut = total_ht_devis
+        
+        # Calculer le ratio de remise
+        if total_ht_brut > 0 and total_ht_devis > 0 and total_ht_devis < total_ht_brut:
+            ratio_remise = total_ht_devis / total_ht_brut
+        else:
+            ratio_remise = 1.0
+        
+        print(f"   Total HT brut: {total_ht_brut} | Ratio remise: {ratio_remise}")
+        
         if type_facture == "acompte":
             numero_facture = f"FAC-ACO-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
             total_ttc = round(total_ttc_devis * taux_acompte / 100, 2)
             total_ht = round(total_ht_devis * taux_acompte / 100, 2)
             description = f"Acompte {taux_acompte}% - {devis.get('titre_projet', 'Devis ' + devis.get('numero', ''))}"
             acompte_ttc_deja_facture = None
+            lignes_finales = None  # Pas de lignes détaillées pour acompte
+            
+            # Pour acompte : une seule prestation forfaitaire
+            prestations_facture = [Prestation(
+                description=description,
+                quantite=1,
+                unite="forfait",
+                prix_unitaire=total_ht,
+                tva_taux=tva_taux
+            )]
+            
         else:  # finale ou complete
             numero_facture = f"FAC-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
-            # Pour facture finale : on facture le TOTAL du devis, et on déduit l'acompte dans l'affichage
-            total_ttc = total_ttc_devis  # Le total reste le total du devis
+            total_ttc = total_ttc_devis
             total_ht = total_ht_devis
             acompte_ttc_deja_facture = acompte_paye if acompte_paye > 0 else None
             
-            if acompte_paye > 0:
-                description = f"{devis.get('titre_projet', 'Facture')}"
+            # Pour facture finale : construire les lignes détaillées avec HT après remise
+            lignes_finales = []
+            prestations_facture = []
+            
+            if prestations_devis:
+                for p in prestations_devis:
+                    desc = p.get("description", "Prestation")
+                    qte = float(p.get("quantite", 1) or 1)
+                    unite = p.get("unite", "u") or "u"
+                    prix_unitaire = float(p.get("prix_unitaire", 0) or p.get("prix_unitaire_ht", 0) or 0)
+                    ligne_tva = float(p.get("tva_taux", tva_taux) if p.get("tva_taux") is not None else tva_taux)
+                    
+                    # Calculer le HT de la ligne après remise
+                    ht_ligne_brut = qte * prix_unitaire
+                    ht_ligne_apres_remise = round(ht_ligne_brut * ratio_remise, 2)
+                    
+                    # Ajouter à lignes_finales (pour le PDF)
+                    lignes_finales.append(LigneFinale(
+                        description=desc,
+                        quantite=qte,
+                        unite=unite,
+                        ht_apres_remise=ht_ligne_apres_remise,
+                        tva_taux=ligne_tva
+                    ))
+                    
+                    # Ajouter aux prestations normales (pour compatibilité)
+                    prestations_facture.append(Prestation(
+                        description=desc,
+                        quantite=qte,
+                        unite=unite,
+                        prix_unitaire=round(ht_ligne_apres_remise / qte, 2) if qte > 0 else 0,
+                        tva_taux=ligne_tva
+                    ))
+                
+                print(f"   Lignes finales construites: {len(lignes_finales)}")
             else:
+                # Fallback : une seule ligne forfaitaire
                 description = f"{devis.get('titre_projet', 'Facture')}"
+                prestations_facture = [Prestation(
+                    description=description,
+                    quantite=1,
+                    unite="forfait",
+                    prix_unitaire=total_ht,
+                    tva_taux=tva_taux
+                )]
+                lignes_finales = None
         
         print(f"   Facture générée: {numero_facture} | TTC: {total_ttc} | HT: {total_ht}")
         
@@ -3852,18 +3943,10 @@ def generer_facture_complete(phone: str, devis: Dict, type_facture: str, taux_ac
             email=devis.get("client_email", ""),
         )
         
-        prestation = Prestation(
-            description=description,
-            quantite=1,
-            unite="forfait",
-            prix_unitaire=total_ht,
-            tva_taux=tva_taux
-        )
-        
         facture_request = FactureRequest(
             entreprise=entreprise_obj,
             client=client_obj,
-            prestations=[prestation],
+            prestations=prestations_facture,
             tva_taux=tva_taux,
             numero_devis_origine=devis.get("numero"),
             numero_facture=numero_facture,
@@ -3872,13 +3955,38 @@ def generer_facture_complete(phone: str, devis: Dict, type_facture: str, taux_ac
             taux_acompte=taux_acompte if type_facture == "acompte" else None,
             total_ht=total_ht,
             total_ttc=total_ttc,
+            total_ht_devis=total_ht_devis,
+            total_ttc_devis=total_ttc_devis,
             acompte_ttc_deja_facture=acompte_ttc_deja_facture,
             acompte_references=acompte_refs if acompte_refs else None,
+            lignes_finales_devis=lignes_finales,
+            remise_type="pourcentage" if ratio_remise < 1 else None,
+            remise_valeur=round((1 - ratio_remise) * 100, 1) if ratio_remise < 1 else 0,
         )
         
         # Générer PDF
         filepath_pdf, numero, _, _ = generer_pdf_facture(facture_request, numero_facture)
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_facture}.pdf")
+        
+        # Préparer les prestations pour le dashboard
+        if type_facture == "acompte":
+            prestations_db = [{"description": f"Acompte {taux_acompte}% - {devis.get('titre_projet', '')}", "quantite": 1, "unite": "forfait", "prix_unitaire": total_ht}]
+        else:
+            # Pour facture finale : sauvegarder les lignes détaillées
+            prestations_db = []
+            if prestations_devis:
+                for p in prestations_devis:
+                    qte = float(p.get("quantite", 1) or 1)
+                    prix = float(p.get("prix_unitaire", 0) or p.get("prix_unitaire_ht", 0) or 0)
+                    ht_apres_remise = round(qte * prix * ratio_remise, 2)
+                    prestations_db.append({
+                        "description": p.get("description", "Prestation"),
+                        "quantite": qte,
+                        "unite": p.get("unite", "u"),
+                        "prix_unitaire": round(ht_apres_remise / qte, 2) if qte > 0 else 0
+                    })
+            else:
+                prestations_db = [{"description": devis.get('titre_projet', 'Facture'), "quantite": 1, "unite": "forfait", "prix_unitaire": total_ht}]
         
         # Sauvegarder dans dashboard
         save_facture_to_dashboard(
@@ -3890,13 +3998,14 @@ def generer_facture_complete(phone: str, devis: Dict, type_facture: str, taux_ac
             client_telephone=devis.get("client_tel"),
             client_adresse=devis.get("client_adresse"),
             titre_projet=devis.get("titre_projet"),
-            prestations=[{"description": description, "quantite": 1, "unite": "forfait", "prix_unitaire": total_ht}],
+            prestations=prestations_db,
             total_ht=total_ht,
             total_ttc=total_ttc,
             pdf_url=pdf_url,
             word_url=None,
             type_facture="acompte" if type_facture == "acompte" else "complete",
-            tva_taux=tva_taux
+            tva_taux=tva_taux,
+            solde_a_payer=round(total_ttc - acompte_paye, 2) if acompte_paye > 0 else None
         )
         
         return {
