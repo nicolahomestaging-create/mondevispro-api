@@ -3129,6 +3129,8 @@ def debug_env():
 # =============================================================================
 # =============================================================================
 # =============================================================================
+# =============================================================================
+# =============================================================================
 # WEBHOOK WHATSAPP v6 - FLOW COMPLET STRUCTURÉ
 # =============================================================================
 #
@@ -3756,42 +3758,53 @@ def ai_chat(phone: str, message: str, entreprise: Dict) -> Dict:
     # Construire le prompt système
     system_prompt = f"""Tu es l'assistant IA de Vocario pour {entreprise.get('nom', 'un artisan')}.
 
-## TON RÔLE
-Tu aides à gérer les devis et factures via WhatsApp. Tu dois être:
-- Naturel et conversationnel (pas robotique)
-- Concis (c'est WhatsApp, pas un email)
-- Proactif (propose des actions)
+RÈGLE ABSOLUE: NE JAMAIS afficher de JSON brut à l'utilisateur.
 
-## CONTEXTE ACTUEL
-Derniers devis: {json.dumps(context.get('derniers_devis', []), ensure_ascii=False)}
-Dernières factures: {json.dumps(context.get('dernieres_factures', []), ensure_ascii=False)}
-Stats du mois: {json.dumps(context.get('stats_mois', {}), ensure_ascii=False)}
+## CONTEXTE
+Devis récents:
+{chr(10).join([f"- {d.get('numero', 'N/A')}: {d.get('client', 'N/A')} ({d.get('total', 0):.0f}€)" for d in context.get('derniers_devis', [])[:3]])}
 
-## CE QUE TU PEUX FAIRE
-1. Répondre aux questions (prix, stats, statut)
-2. Déclencher des actions via JSON
+Factures récentes:
+{chr(10).join([f"- {f.get('numero', 'N/A')}: {f.get('client', 'N/A')} ({f.get('total', 0):.0f}€)" for f in context.get('dernieres_factures', [])[:3]])}
 
-## FORMAT DE RÉPONSE
-- Pour une réponse simple: écris juste le texte
-- Pour une action: retourne UNIQUEMENT un JSON comme ci-dessous
+Stats: CA encaissé={context.get('stats_mois', {}).get('ca_encaisse', 0):.0f}€
 
-### Actions disponibles:
-{{"action": "show_devis", "numero": "DEV-xxx"}} - Afficher/envoyer un devis
-{{"action": "show_facture", "numero": "FAC-xxx"}} - Afficher/envoyer une facture  
-{{"action": "create_devis", "client": "nom"}} - Créer un devis
-{{"action": "create_acompte", "devis": "DEV-xxx", "taux": 30}} - Créer un acompte
-{{"action": "create_facture", "devis": "DEV-xxx"}} - Créer une facture finale
-{{"action": "send_email", "numero": "DEV-xxx", "email": "x@x.com", "signature": true}} - Envoyer par email
-{{"action": "send_whatsapp", "numero": "DEV-xxx", "tel": "06xxx"}} - Envoyer par WhatsApp
-{{"action": "mark_paid", "numero": "FAC-xxx"}} - Marquer comme payée
-{{"action": "show_menu"}} - Afficher le menu principal
+## COMMENT RÉPONDRE
 
-## RÈGLES
-- Si l'utilisateur dit "oui", "ok", "envoie", "montre" sans préciser quoi → utilise le dernier document mentionné dans la conversation
-- Si tu ne comprends pas → demande de préciser gentiment
-- Ne dis jamais "je ne peux pas", propose une alternative
-- Utilise des emojis avec modération
-- Tutoie l'utilisateur"""
+Tu as 2 types de réponses possibles:
+
+### TYPE A - Texte simple (pour questions, listes, salutations):
+Réponds naturellement en français.
+Exemples:
+- "Salut ! Comment je peux t'aider ?"
+- "Ton dernier devis est DEV-xxx pour Dupont à 2592€"
+- "Tu as 3 devis: DEV-xxx (Dupont 2592€), DEV-yyy (Martin 1440€)..."
+
+### TYPE B - Action JSON (pour EXÉCUTER une action):
+Retourne UNIQUEMENT le JSON, SANS AUCUN texte avant ou après.
+Le JSON doit être seul sur une ligne.
+
+Actions disponibles:
+{{"action":"show_devis","numero":"DEV-xxx"}}
+{{"action":"show_facture","numero":"FAC-xxx"}}
+{{"action":"create_devis","client":"Nom"}}
+{{"action":"create_acompte","devis":"DEV-xxx","taux":30}}
+{{"action":"send_email","numero":"DEV-xxx","email":"x@x.com","signature":true}}
+{{"action":"mark_paid","numero":"FAC-xxx"}}
+
+## QUAND UTILISER QUOI
+
+"montre mes devis" → TYPE A (liste les devis en texte)
+"montre le pdf du devis Dupont" → TYPE B {{"action":"show_devis","numero":"DEV-xxx"}}
+"combien coûte le devis Martin" → TYPE A "Le devis Martin est à 1440€"
+"envoie le par email" → TYPE A "À quelle adresse email ?"
+"envoie à test@gmail.com" → TYPE B {{"action":"send_email","numero":"DEV-xxx","email":"test@gmail.com","signature":true}}
+"mon CA" → TYPE A "CA ce mois: 5000€"
+
+## INTERDIT
+- Jamais afficher plusieurs JSON
+- Jamais mettre du texte avant/après un JSON
+- Jamais dire "je vais..." puis montrer le JSON"""
 
     # Ajouter le message à l'historique
     chat_history.append({"role": "user", "content": message})
@@ -3809,6 +3822,8 @@ Stats du mois: {json.dumps(context.get('stats_mois', {}), ensure_ascii=False)}
         
         ai_response = response.content[0].text.strip()
         
+        print(f"🤖 IA brute: {ai_response[:300]}")
+        
         # Ajouter la réponse à l'historique
         chat_history.append({"role": "assistant", "content": ai_response})
         
@@ -3816,12 +3831,52 @@ Stats du mois: {json.dumps(context.get('stats_mois', {}), ensure_ascii=False)}
         conv["data"]["chat_history"] = chat_history
         save_conv(phone, conv)
         
-        # Parser la réponse
-        if ai_response.startswith("{") and "action" in ai_response:
+        # === PARSING JSON ===
+        # Méthode 1: La réponse EST un JSON pur (commence par { et finit par })
+        if ai_response.startswith("{") and ai_response.endswith("}"):
             try:
-                return json.loads(ai_response)
-            except:
+                action_data = json.loads(ai_response)
+                if "action" in action_data:
+                    print(f"✅ Action JSON pure: {action_data['action']}")
+                    return action_data
+            except json.JSONDecodeError:
                 pass
+        
+        # Méthode 2: Extraire le PREMIER JSON valide
+        if '{"action"' in ai_response:
+            try:
+                start = ai_response.find('{"action"')
+                if start != -1:
+                    # Trouver le } correspondant
+                    brace_count = 0
+                    end = start
+                    for i, c in enumerate(ai_response[start:], start):
+                        if c == "{":
+                            brace_count += 1
+                        elif c == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end = i + 1
+                                break
+                    
+                    json_str = ai_response[start:end]
+                    action_data = json.loads(json_str)
+                    if "action" in action_data:
+                        print(f"✅ Action extraite: {action_data['action']}")
+                        return action_data
+            except Exception as e:
+                print(f"⚠️ Erreur parsing JSON: {e}")
+        
+        # Si la réponse contient du JSON brut non parsable, NE PAS l'afficher
+        if '"action"' in ai_response or '{"' in ai_response:
+            print(f"⚠️ JSON détecté mais non parsable, on masque")
+            # Nettoyer en enlevant tout ce qui ressemble à du JSON
+            clean = re.sub(r'\{[^}]*\}', '', ai_response).strip()
+            clean = re.sub(r'\s+', ' ', clean)  # Espaces multiples
+            if clean and len(clean) > 5 and not clean.startswith('{'):
+                return {"response": clean}
+            else:
+                return {"response": "Je traite ta demande. Peux-tu préciser ce que tu veux faire ?"}
         
         return {"response": ai_response}
         
@@ -5273,6 +5328,85 @@ _Envoyez tout en un message_""")
     # Après génération devis
     if state == State.DEVIS_GENERE:
         devis = data.get("devis_genere", {})
+        
+        # Gestion du choix signature
+        if data.get("waiting_signature_choice_devis"):
+            client_email = data.get("email_dest_devis", "") or devis.get("client_email", "")
+            
+            if msg_lower in ["1", "signature", "avec", "oui"]:
+                # Avec signature
+                entreprise = get_entreprise(phone)
+                if entreprise and client_email:
+                    devis_id = devis.get("id")
+                    if not devis_id and supabase_client:
+                        try:
+                            result = supabase_client.table('devis')\
+                                .select('id')\
+                                .eq('numero_devis', devis['numero'])\
+                                .eq('entreprise_id', entreprise['id'])\
+                                .execute()
+                            if result.data:
+                                devis_id = result.data[0].get('id')
+                        except:
+                            pass
+                    
+                    signature_url = f"https://www.vocario.fr/signer/{devis_id}" if devis_id else None
+                    
+                    if send_email_devis_pro(
+                        to_email=client_email,
+                        client_nom=devis.get("client_nom", ""),
+                        entreprise_nom=entreprise.get("nom", ""),
+                        entreprise_email=entreprise.get("email", ""),
+                        entreprise_tel=entreprise.get("tel", ""),
+                        numero_devis=devis["numero"],
+                        titre_projet=devis.get("titre_projet", ""),
+                        total_ttc=devis.get("total_ttc", 0),
+                        pdf_url=devis["pdf_url"],
+                        signature_url=signature_url,
+                        couleur=entreprise.get("couleur_pdf", "#2F665B")
+                    ):
+                        send_whatsapp(phone_full, f"✅ *Email avec signature envoyé à {client_email}* !")
+                    else:
+                        send_whatsapp(phone_full, "❌ Erreur envoi email")
+                
+                data["waiting_signature_choice_devis"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                return
+            
+            elif msg_lower in ["2", "sans", "pdf", "non"]:
+                # Sans signature
+                entreprise = get_entreprise(phone)
+                if entreprise and client_email:
+                    if send_email_devis_pro(
+                        to_email=client_email,
+                        client_nom=devis.get("client_nom", ""),
+                        entreprise_nom=entreprise.get("nom", ""),
+                        entreprise_email=entreprise.get("email", ""),
+                        entreprise_tel=entreprise.get("tel", ""),
+                        numero_devis=devis["numero"],
+                        titre_projet=devis.get("titre_projet", ""),
+                        total_ttc=devis.get("total_ttc", 0),
+                        pdf_url=devis["pdf_url"],
+                        signature_url=None,
+                        couleur=entreprise.get("couleur_pdf", "#2F665B")
+                    ):
+                        send_whatsapp(phone_full, f"✅ *Email envoyé à {client_email}* !")
+                    else:
+                        send_whatsapp(phone_full, "❌ Erreur envoi email")
+                
+                data["waiting_signature_choice_devis"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                return
+            
+            elif msg_lower in ["3", "annuler"]:
+                data["waiting_signature_choice_devis"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, "❌ Annulé")
+                return
+        
         if msg_lower in ["1", "whatsapp", "envoyer"]:
             client_tel = devis.get("client_tel", "")
             if client_tel:
@@ -5284,11 +5418,16 @@ _Envoyez tout en un message_""")
         if msg_lower in ["2", "email"]:
             client_email = devis.get("client_email", "")
             if client_email:
-                html = f"<p>Bonjour,</p><p>Veuillez trouver ci-joint votre devis n° <strong>{devis['numero']}</strong>.</p><p>Montant : <strong>{devis['total_ttc']:.2f}€ TTC</strong></p><p>Cordialement</p>"
-                if send_email_with_pdf(client_email, f"Devis {devis['numero']}", html, devis["pdf_url"], f"{devis['numero']}.pdf"):
-                    send_whatsapp(phone_full, f"✅ Email envoyé à {client_email} !")
-                else:
-                    send_whatsapp(phone_full, "❌ Erreur envoi email")
+                # Proposer avec ou sans signature
+                data["email_dest_devis"] = client_email
+                data["waiting_signature_choice_devis"] = True
+                conv["data"] = data
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, f"""📧 *Envoi du devis à {client_email}*
+
+*1.* ✍️ Avec signature électronique
+*2.* 📄 Sans signature (PDF seul)
+*3.* ❌ Annuler""")
             else:
                 send_whatsapp(phone_full, "❌ Pas d'email client")
             return
