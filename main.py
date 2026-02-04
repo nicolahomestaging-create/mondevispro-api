@@ -3127,6 +3127,7 @@ def debug_env():
 # =============================================================================
 # =============================================================================
 # =============================================================================
+# =============================================================================
 # WEBHOOK WHATSAPP v6 - FLOW COMPLET STRUCTURÉ
 # =============================================================================
 #
@@ -3402,6 +3403,653 @@ def send_email_with_pdf(to_email: str, subject: str, body_html: str, pdf_url: st
     except Exception as e:
         print(f"❌ Erreur email: {e}")
         return False
+
+
+def send_email_devis_pro(
+    to_email: str,
+    client_nom: str,
+    entreprise_nom: str,
+    entreprise_email: str,
+    entreprise_tel: str,
+    numero_devis: str,
+    titre_projet: str,
+    total_ttc: float,
+    pdf_url: str,
+    signature_url: str = None,
+    couleur: str = "#2F665B"
+) -> bool:
+    """Envoie un email professionnel pour un devis avec option signature"""
+    if not RESEND_API_KEY:
+        print("❌ Resend non configuré")
+        return False
+    
+    if not to_email or "@" not in to_email:
+        print(f"❌ Email invalide: {to_email}")
+        return False
+    
+    # Extraire le prénom du client
+    prenom = client_nom.split()[0] if client_nom else "Client"
+    
+    # Bouton signature ou téléchargement
+    if signature_url:
+        bouton_principal = f'''
+        <a href="{signature_url}" style="display: inline-block; background-color: {couleur}; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
+            ✍️ Signer le devis
+        </a>
+        '''
+        texte_action = "Cliquez sur le bouton ci-dessous pour consulter et signer votre devis en ligne :"
+    else:
+        bouton_principal = f'''
+        <a href="{pdf_url}" style="display: inline-block; background-color: {couleur}; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
+            📄 Télécharger le devis
+        </a>
+        '''
+        texte_action = "Cliquez sur le bouton ci-dessous pour télécharger votre devis :"
+    
+    html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px;">
+            <tr>
+                <td align="center">
+                    <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        
+                        <!-- Header -->
+                        <tr>
+                            <td style="background-color: {couleur}; padding: 30px 40px; text-align: center;">
+                                <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 600;">{entreprise_nom}</h1>
+                            </td>
+                        </tr>
+                        
+                        <!-- Content -->
+                        <tr>
+                            <td style="padding: 40px;">
+                                <p style="font-size: 16px; color: #333; margin: 0 0 20px 0;">
+                                    Bonjour {prenom},
+                                </p>
+                                
+                                <p style="font-size: 16px; color: #333; margin: 0 0 20px 0;">
+                                    Veuillez trouver ci-joint votre devis pour : <strong>{titre_projet}</strong>
+                                </p>
+                                
+                                <!-- Montant -->
+                                <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 25px 0;">
+                                    <tr>
+                                        <td style="padding: 20px; text-align: center;">
+                                            <p style="margin: 0; color: #666; font-size: 14px;">Montant total TTC</p>
+                                            <p style="margin: 10px 0 0 0; color: {couleur}; font-size: 32px; font-weight: bold;">{total_ttc:.2f} €</p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Info devis -->
+                                <p style="font-size: 14px; color: #666; margin: 0 0 25px 0; text-align: center;">
+                                    Devis n° <strong>{numero_devis}</strong>
+                                </p>
+                                
+                                <!-- Texte action -->
+                                <p style="font-size: 16px; color: #333; margin: 0 0 25px 0;">
+                                    {texte_action}
+                                </p>
+                                
+                                <!-- Bouton -->
+                                <table width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td align="center" style="padding: 10px 0 30px 0;">
+                                            {bouton_principal}
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Télécharger PDF si signature active -->
+                                {f'<p style="font-size: 14px; color: #666; text-align: center; margin: 0 0 20px 0;"><a href="{pdf_url}" style="color: {couleur};">📎 Télécharger le PDF</a></p>' if signature_url else ''}
+                                
+                                <p style="font-size: 16px; color: #333; margin: 20px 0 0 0;">
+                                    Cordialement,
+                                </p>
+                                <p style="font-size: 16px; color: #333; margin: 5px 0 0 0; font-weight: 600;">
+                                    {entreprise_nom}
+                                </p>
+                            </td>
+                        </tr>
+                        
+                        <!-- Footer -->
+                        <tr>
+                            <td style="background-color: #f8f9fa; padding: 25px 40px; border-top: 1px solid #eee;">
+                                <table width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td style="text-align: center;">
+                                            <p style="margin: 0 0 5px 0; font-size: 14px; color: #666;">
+                                                📞 {entreprise_tel}
+                                            </p>
+                                            <p style="margin: 0; font-size: 14px; color: #666;">
+                                                ✉️ {entreprise_email}
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                        
+                        <!-- Powered by -->
+                        <tr>
+                            <td style="padding: 15px; text-align: center; background-color: #fafafa;">
+                                <p style="margin: 0; font-size: 12px; color: #999;">
+                                    Envoyé via <a href="https://vocario.fr" style="color: {couleur}; text-decoration: none;">Vocario</a>
+                                </p>
+                            </td>
+                        </tr>
+                        
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    '''
+    
+    try:
+        params = {
+            "from": f"{entreprise_nom} <contact@vocario.fr>",
+            "to": [to_email],
+            "subject": f"Devis n° {numero_devis} - {titre_projet}",
+            "html": html
+        }
+        
+        # Attacher le PDF
+        if pdf_url:
+            try:
+                pdf_response = requests.get(pdf_url, timeout=30)
+                if pdf_response.status_code == 200:
+                    import base64
+                    pdf_base64 = base64.b64encode(pdf_response.content).decode('utf-8')
+                    params["attachments"] = [{"filename": f"{numero_devis}.pdf", "content": pdf_base64}]
+                    print(f"📎 PDF attaché: {numero_devis}.pdf")
+            except Exception as e:
+                print(f"⚠️ Erreur téléchargement PDF: {e}")
+        
+        resend.Emails.send(params)
+        print(f"✅ Email pro envoyé à {to_email}")
+        return True
+    except Exception as e:
+        print(f"❌ Erreur email: {e}")
+        return False
+
+
+def send_email_facture_pro(
+    to_email: str,
+    client_nom: str,
+    entreprise_nom: str,
+    entreprise_email: str,
+    entreprise_tel: str,
+    numero_facture: str,
+    titre_projet: str,
+    total_ttc: float,
+    pdf_url: str,
+    couleur: str = "#2F665B"
+) -> bool:
+    """Envoie un email professionnel pour une facture"""
+    if not RESEND_API_KEY:
+        print("❌ Resend non configuré")
+        return False
+    
+    if not to_email or "@" not in to_email:
+        print(f"❌ Email invalide: {to_email}")
+        return False
+    
+    prenom = client_nom.split()[0] if client_nom else "Client"
+    
+    html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px;">
+            <tr>
+                <td align="center">
+                    <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        
+                        <!-- Header -->
+                        <tr>
+                            <td style="background-color: {couleur}; padding: 30px 40px; text-align: center;">
+                                <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 600;">{entreprise_nom}</h1>
+                            </td>
+                        </tr>
+                        
+                        <!-- Content -->
+                        <tr>
+                            <td style="padding: 40px;">
+                                <p style="font-size: 16px; color: #333; margin: 0 0 20px 0;">
+                                    Bonjour {prenom},
+                                </p>
+                                
+                                <p style="font-size: 16px; color: #333; margin: 0 0 20px 0;">
+                                    Veuillez trouver ci-joint votre facture pour : <strong>{titre_projet}</strong>
+                                </p>
+                                
+                                <!-- Montant -->
+                                <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 25px 0;">
+                                    <tr>
+                                        <td style="padding: 20px; text-align: center;">
+                                            <p style="margin: 0; color: #666; font-size: 14px;">Montant à régler</p>
+                                            <p style="margin: 10px 0 0 0; color: {couleur}; font-size: 32px; font-weight: bold;">{total_ttc:.2f} €</p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Info facture -->
+                                <p style="font-size: 14px; color: #666; margin: 0 0 25px 0; text-align: center;">
+                                    Facture n° <strong>{numero_facture}</strong>
+                                </p>
+                                
+                                <!-- Bouton -->
+                                <table width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td align="center" style="padding: 10px 0 30px 0;">
+                                            <a href="{pdf_url}" style="display: inline-block; background-color: {couleur}; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
+                                                📄 Télécharger la facture
+                                            </a>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <p style="font-size: 16px; color: #333; margin: 20px 0 0 0;">
+                                    Cordialement,
+                                </p>
+                                <p style="font-size: 16px; color: #333; margin: 5px 0 0 0; font-weight: 600;">
+                                    {entreprise_nom}
+                                </p>
+                            </td>
+                        </tr>
+                        
+                        <!-- Footer -->
+                        <tr>
+                            <td style="background-color: #f8f9fa; padding: 25px 40px; border-top: 1px solid #eee;">
+                                <table width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td style="text-align: center;">
+                                            <p style="margin: 0 0 5px 0; font-size: 14px; color: #666;">
+                                                📞 {entreprise_tel}
+                                            </p>
+                                            <p style="margin: 0; font-size: 14px; color: #666;">
+                                                ✉️ {entreprise_email}
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                        
+                        <!-- Powered by -->
+                        <tr>
+                            <td style="padding: 15px; text-align: center; background-color: #fafafa;">
+                                <p style="margin: 0; font-size: 12px; color: #999;">
+                                    Envoyé via <a href="https://vocario.fr" style="color: {couleur}; text-decoration: none;">Vocario</a>
+                                </p>
+                            </td>
+                        </tr>
+                        
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    '''
+    
+    try:
+        params = {
+            "from": f"{entreprise_nom} <contact@vocario.fr>",
+            "to": [to_email],
+            "subject": f"Facture n° {numero_facture} - {titre_projet}",
+            "html": html
+        }
+        
+        # Attacher le PDF
+        if pdf_url:
+            try:
+                pdf_response = requests.get(pdf_url, timeout=30)
+                if pdf_response.status_code == 200:
+                    import base64
+                    pdf_base64 = base64.b64encode(pdf_response.content).decode('utf-8')
+                    params["attachments"] = [{"filename": f"{numero_facture}.pdf", "content": pdf_base64}]
+                    print(f"📎 PDF attaché: {numero_facture}.pdf")
+            except Exception as e:
+                print(f"⚠️ Erreur téléchargement PDF: {e}")
+        
+        resend.Emails.send(params)
+        print(f"✅ Email facture envoyé à {to_email}")
+        return True
+    except Exception as e:
+        print(f"❌ Erreur email: {e}")
+        return False
+
+
+# =============================================================================
+# IA CONVERSATIONNELLE HYBRIDE
+# =============================================================================
+
+def analyze_intent(phone: str, message: str, entreprise: Dict) -> Dict:
+    """
+    Analyse l'intention de l'utilisateur avec Claude Haiku.
+    Retourne le type d'intention et les données extraites.
+    """
+    if not anthropic_client:
+        return {"type": "unknown"}
+    
+    # Récupérer le contexte (derniers devis/factures)
+    context = get_user_context(phone, entreprise)
+    
+    prompt = f"""Tu es l'assistant IA de Vocario pour un artisan. Analyse ce message et détermine l'intention.
+
+CONTEXTE UTILISATEUR:
+- Entreprise: {entreprise.get('nom', 'Inconnue')}
+- Derniers devis: {context.get('derniers_devis', [])}
+- Dernières factures: {context.get('dernieres_factures', [])}
+- Stats du mois: {context.get('stats_mois', {})}
+
+MESSAGE: "{message}"
+
+INTENTIONS POSSIBLES:
+1. QUESTION_PRIX - Demande le prix/montant d'un devis ou facture
+2. QUESTION_STATS - Demande des statistiques (CA, nombre de devis, etc.)
+3. QUESTION_STATUT - Demande le statut d'un document
+4. QUESTION_INFO - Question générale sur Vocario ou l'entreprise
+5. ACTION_DEVIS - Veut créer un devis
+6. ACTION_FACTURE - Veut créer une facture
+7. ACTION_ACOMPTE - Veut faire un acompte
+8. ACTION_ENVOYER - Veut envoyer un document
+9. ACTION_MARQUER_PAYE - Veut marquer comme payé
+10. MENU - Veut voir le menu
+11. SALUTATION - Dit bonjour/merci/etc.
+12. UNKNOWN - Pas compris
+
+Retourne UNIQUEMENT un JSON valide:
+{{"type": "...", "data": {{"client": "...", "numero": "...", "periode": "..."}}}}
+
+Exemples:
+- "ça coute combien le devis dupont" → {{"type": "QUESTION_PRIX", "data": {{"client": "dupont"}}}}
+- "mon CA ce mois" → {{"type": "QUESTION_STATS", "data": {{"periode": "mois"}}}}
+- "fais un acompte 30% sur dupont" → {{"type": "ACTION_ACOMPTE", "data": {{"client": "dupont", "taux": 30}}}}
+- "envoie la facture à martin" → {{"type": "ACTION_ENVOYER", "data": {{"client": "martin", "type_doc": "facture"}}}}
+- "bonjour" → {{"type": "SALUTATION", "data": {{}}}}
+"""
+
+    try:
+        response = anthropic_client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        result = response.content[0].text.strip()
+        
+        # Parser le JSON
+        if result.startswith("{"):
+            import json
+            return json.loads(result)
+    except Exception as e:
+        print(f"❌ Erreur analyse intention: {e}")
+    
+    return {"type": "UNKNOWN", "data": {}}
+
+
+def get_user_context(phone: str, entreprise: Dict) -> Dict:
+    """Récupère le contexte de l'utilisateur pour l'IA"""
+    context = {
+        "derniers_devis": [],
+        "dernieres_factures": [],
+        "stats_mois": {}
+    }
+    
+    if not supabase_client or not entreprise:
+        return context
+    
+    entreprise_id = entreprise.get("id")
+    if not entreprise_id:
+        return context
+    
+    try:
+        # Derniers devis
+        result = supabase_client.table('devis')\
+            .select('numero_devis, client_nom, total_ttc, statut, titre_projet')\
+            .eq('entreprise_id', entreprise_id)\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(5)\
+            .execute()
+        
+        if result.data:
+            context["derniers_devis"] = [
+                {"numero": d.get("numero_devis"), "client": d.get("client_nom"), "montant": d.get("total_ttc"), "statut": d.get("statut"), "projet": d.get("titre_projet")}
+                for d in result.data
+            ]
+        
+        # Dernières factures
+        result = supabase_client.table('factures')\
+            .select('numero_facture, client_nom, total_ttc, statut')\
+            .eq('entreprise_id', entreprise_id)\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(5)\
+            .execute()
+        
+        if result.data:
+            context["dernieres_factures"] = [
+                {"numero": f.get("numero_facture"), "client": f.get("client_nom"), "montant": f.get("total_ttc"), "statut": f.get("statut")}
+                for f in result.data
+            ]
+        
+        # Stats du mois
+        from datetime import datetime
+        debut_mois = datetime.now().replace(day=1).strftime('%Y-%m-%d')
+        
+        result = supabase_client.table('factures')\
+            .select('total_ttc, statut')\
+            .eq('entreprise_id', entreprise_id)\
+            .gte('date', debut_mois)\
+            .is_('deleted_at', 'null')\
+            .execute()
+        
+        if result.data:
+            total_ca = sum(f.get("total_ttc", 0) for f in result.data if f.get("statut") == "payee")
+            total_en_attente = sum(f.get("total_ttc", 0) for f in result.data if f.get("statut") != "payee")
+            context["stats_mois"] = {
+                "ca_encaisse": total_ca,
+                "en_attente": total_en_attente,
+                "nb_factures": len(result.data)
+            }
+        
+        # Devis en attente
+        result = supabase_client.table('devis')\
+            .select('id')\
+            .eq('entreprise_id', entreprise_id)\
+            .eq('statut', 'en_attente')\
+            .is_('deleted_at', 'null')\
+            .execute()
+        
+        if result.data:
+            context["stats_mois"]["devis_en_attente"] = len(result.data)
+    
+    except Exception as e:
+        print(f"❌ Erreur contexte: {e}")
+    
+    return context
+
+
+def handle_question(phone: str, intent: Dict, entreprise: Dict) -> str:
+    """Gère les questions et retourne une réponse textuelle"""
+    intent_type = intent.get("type", "")
+    data = intent.get("data", {})
+    
+    entreprise_id = entreprise.get("id")
+    
+    # === QUESTION SUR LE PRIX ===
+    if intent_type == "QUESTION_PRIX":
+        client = data.get("client", "").lower()
+        numero = data.get("numero", "")
+        
+        if supabase_client and (client or numero):
+            try:
+                # Chercher dans les devis
+                query = supabase_client.table('devis')\
+                    .select('numero_devis, client_nom, total_ttc, titre_projet, statut')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .is_('deleted_at', 'null')
+                
+                if numero:
+                    query = query.ilike('numero_devis', f'%{numero}%')
+                
+                result = query.order('created_at', desc=True).limit(10).execute()
+                
+                if result.data:
+                    # Filtrer par client si spécifié
+                    matches = result.data
+                    if client:
+                        matches = [d for d in result.data if client in d.get("client_nom", "").lower()]
+                    
+                    if matches:
+                        if len(matches) == 1:
+                            d = matches[0]
+                            return f"📋 *Devis {d['numero_devis']}*\n👤 {d['client_nom']}\n💰 *{d['total_ttc']:.2f}€ TTC*\n📝 {d.get('titre_projet', '')}"
+                        else:
+                            liste = "\n".join([f"• {d['numero_devis']} - {d['client_nom']} : *{d['total_ttc']:.2f}€*" for d in matches[:5]])
+                            return f"J'ai trouvé {len(matches)} devis :\n\n{liste}"
+                
+                # Chercher dans les factures
+                query = supabase_client.table('factures')\
+                    .select('numero_facture, client_nom, total_ttc, statut')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .is_('deleted_at', 'null')
+                
+                result = query.order('created_at', desc=True).limit(10).execute()
+                
+                if result.data:
+                    matches = result.data
+                    if client:
+                        matches = [f for f in result.data if client in f.get("client_nom", "").lower()]
+                    
+                    if matches:
+                        if len(matches) == 1:
+                            f = matches[0]
+                            statut = "✅ Payée" if f.get("statut") == "payee" else "⏳ En attente"
+                            return f"🧾 *Facture {f['numero_facture']}* {statut}\n👤 {f['client_nom']}\n💰 *{f['total_ttc']:.2f}€ TTC*"
+                        else:
+                            liste = "\n".join([f"• {f['numero_facture']} - {f['client_nom']} : *{f['total_ttc']:.2f}€*" for f in matches[:5]])
+                            return f"J'ai trouvé {len(matches)} factures :\n\n{liste}"
+            
+            except Exception as e:
+                print(f"❌ Erreur recherche prix: {e}")
+        
+        return "Je n'ai pas trouvé ce document. Tapez *3* pour voir vos documents."
+    
+    # === QUESTION STATS ===
+    elif intent_type == "QUESTION_STATS":
+        context = get_user_context(phone, entreprise)
+        stats = context.get("stats_mois", {})
+        
+        ca = stats.get("ca_encaisse", 0)
+        attente = stats.get("en_attente", 0)
+        nb_factures = stats.get("nb_factures", 0)
+        devis_attente = stats.get("devis_en_attente", 0)
+        
+        from datetime import datetime
+        mois = datetime.now().strftime("%B %Y")
+        
+        return f"""📊 *Statistiques {mois}*
+
+💰 CA encaissé : *{ca:.2f}€*
+⏳ En attente de paiement : *{attente:.2f}€*
+🧾 Factures émises : *{nb_factures}*
+📋 Devis en attente : *{devis_attente}*"""
+    
+    # === QUESTION STATUT ===
+    elif intent_type == "QUESTION_STATUT":
+        client = data.get("client", "").lower()
+        
+        if supabase_client and client:
+            try:
+                # Devis du client
+                result = supabase_client.table('devis')\
+                    .select('numero_devis, statut, total_ttc')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .ilike('client_nom', f'%{client}%')\
+                    .is_('deleted_at', 'null')\
+                    .order('created_at', desc=True)\
+                    .limit(3)\
+                    .execute()
+                
+                if result.data:
+                    d = result.data[0]
+                    statut_txt = {"en_attente": "⏳ En attente", "signe": "✅ Signé", "refuse": "❌ Refusé"}.get(d.get("statut"), d.get("statut"))
+                    return f"📋 Devis {d['numero_devis']} : {statut_txt} ({d['total_ttc']:.2f}€)"
+                
+            except Exception as e:
+                print(f"❌ Erreur statut: {e}")
+        
+        return "Je n'ai pas trouvé de document pour ce client."
+    
+    # === SALUTATION ===
+    elif intent_type == "SALUTATION":
+        from datetime import datetime
+        heure = datetime.now().hour
+        if heure < 12:
+            salut = "Bonjour"
+        elif heure < 18:
+            salut = "Bon après-midi"
+        else:
+            salut = "Bonsoir"
+        
+        return f"{salut} ! 👋\n\nComment puis-je vous aider ?\n\nTapez *menu* pour voir les options."
+    
+    # === QUESTION INFO ===
+    elif intent_type == "QUESTION_INFO":
+        return """🤖 *Je suis Vocario*, votre assistant devis & factures !
+
+Je peux :
+• Créer des devis et factures
+• Générer des acomptes
+• Envoyer vos documents aux clients
+• Vous donner des stats
+
+Tapez *menu* pour commencer !"""
+    
+    return None  # Pas une question, continuer le flow normal
+
+
+def find_document_by_client(client_name: str, entreprise_id: str, doc_type: str = "devis") -> Optional[Dict]:
+    """Trouve un document par nom de client"""
+    if not supabase_client or not client_name:
+        return None
+    
+    try:
+        table = 'devis' if doc_type == "devis" else 'factures'
+        numero_field = 'numero_devis' if doc_type == "devis" else 'numero_facture'
+        
+        result = supabase_client.table(table)\
+            .select('*')\
+            .eq('entreprise_id', entreprise_id)\
+            .ilike('client_nom', f'%{client_name}%')\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+    
+    except Exception as e:
+        print(f"❌ Erreur recherche document: {e}")
+    
+    return None
 
 
 # =============================================================================
@@ -4091,7 +4739,7 @@ def handle_message(phone: str, message: str, button_payload: str = None):
     data = conv.get("data", {})
     
     # === COMMANDES GLOBALES ===
-    if msg_lower in ["menu", "start", "bonjour", "salut", "hello", "0"]:
+    if msg_lower in ["menu", "start", "0"]:
         reset_conv(phone)
         send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
         return
@@ -4100,6 +4748,191 @@ def handle_message(phone: str, message: str, button_payload: str = None):
         reset_conv(phone)
         send_whatsapp(phone_full, "❌ Annulé.\n\nTapez *menu* pour recommencer.")
         return
+    
+    # === IA HYBRIDE : Analyse d'intention pour messages en texte libre ===
+    # Seulement si on est au menu principal et pas en train de suivre un flow guidé
+    # Et si ce n'est pas un bouton ou un chiffre simple
+    if state == State.MENU and not button_payload and not msg_lower.isdigit() and len(msg) > 2:
+        entreprise = get_entreprise(phone)
+        if entreprise:
+            # Analyser l'intention avec Claude
+            intent = analyze_intent(phone, msg, entreprise)
+            intent_type = intent.get("type", "UNKNOWN")
+            intent_data = intent.get("data", {})
+            
+            print(f"🤖 Intent: {intent_type} | Data: {intent_data}")
+            
+            # === QUESTIONS : Répondre directement ===
+            if intent_type.startswith("QUESTION_") or intent_type == "SALUTATION":
+                response = handle_question(phone, intent, entreprise)
+                if response:
+                    send_whatsapp(phone_full, response)
+                    return
+            
+            # === ACTIONS : Rediriger vers le flow guidé approprié ===
+            if intent_type == "ACTION_DEVIS":
+                # Démarrer le flow devis
+                conv["state"] = State.DEVIS_NOM
+                conv["data"] = {}
+                # Si un client est mentionné, pré-remplir
+                if intent_data.get("client"):
+                    conv["data"]["client_nom"] = intent_data["client"].title()
+                    conv["state"] = State.DEVIS_ADRESSE
+                    save_conv(phone, conv)
+                    send_whatsapp(phone_full, f"""📝 *NOUVEAU DEVIS*
+
+👤 Client : *{conv['data']['client_nom']}*
+
+*Étape 2/6* - Adresse (optionnel)
+
+Entrez l'adresse ou tapez *-* pour passer.""")
+                    return
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, """📝 *NOUVEAU DEVIS*
+
+━━━━━━━━━━━━━━━━━━
+*Étape 1/6* - Nom du client
+━━━━━━━━━━━━━━━━━━
+
+Quel est le *nom du client* ?
+
+_Exemple: M. Dupont_""")
+                return
+            
+            if intent_type == "ACTION_ACOMPTE":
+                # Chercher le devis du client mentionné
+                client = intent_data.get("client", "")
+                taux = intent_data.get("taux")
+                
+                if client:
+                    devis = find_document_by_client(client, entreprise["id"], "devis")
+                    if devis:
+                        # Stocker le devis et aller directement au choix du taux
+                        devis_data = {
+                            "id": devis.get("id"),
+                            "numero": devis.get("numero_devis"),
+                            "client_nom": devis.get("client_nom"),
+                            "total_ht": float(devis.get("total_ht", 0)),
+                            "total_ttc": float(devis.get("total_ttc", 0)),
+                        }
+                        conv["data"] = {"selected_devis": devis_data}
+                        
+                        # Si taux spécifié, générer directement
+                        if taux and 1 <= taux <= 90:
+                            conv["data"]["acompte_taux"] = taux
+                            conv["state"] = State.FACTURE_ACOMPTE_CONFIRM
+                            montant = devis_data["total_ttc"] * taux / 100
+                            save_conv(phone, conv)
+                            send_whatsapp(phone_full, f"""💰 *FACTURE D'ACOMPTE*
+
+📋 Devis : {devis_data['numero']}
+👤 Client : {devis_data['client_nom']}
+💵 Total devis : {devis_data['total_ttc']:.2f}€
+
+📊 Acompte : *{taux}%* = *{montant:.2f}€*
+
+Confirmez avec *OK* ou tapez *annuler*""")
+                            return
+                        
+                        # Sinon proposer les taux
+                        conv["state"] = State.FACTURE_ACOMPTE_TAUX
+                        save_conv(phone, conv)
+                        send_whatsapp(phone_full, f"""💰 *ACOMPTE - {devis_data['client_nom']}*
+
+📋 Devis : {devis_data['numero']}
+💵 Total : {devis_data['total_ttc']:.2f}€
+
+Quel pourcentage ?
+
+*1.* 30% = {devis_data['total_ttc']*0.30:.2f}€
+*2.* 40% = {devis_data['total_ttc']*0.40:.2f}€
+*3.* 50% = {devis_data['total_ttc']*0.50:.2f}€
+*4.* Autre pourcentage""")
+                        return
+                
+                # Sinon, afficher la liste des devis
+                devis_list = get_devis_pour_facturation(phone)
+                if devis_list:
+                    msg_list = "💰 *FACTURE D'ACOMPTE*\n\nSur quel devis ?\n\n"
+                    for i, d in enumerate(devis_list, 1):
+                        msg_list += f"*{i}.* {d['numero']} | {d['client_nom']} | {d['total_ttc']:.0f}€\n"
+                    conv["state"] = State.FACTURE_LISTE
+                    conv["data"] = {"devis_list": devis_list, "facture_type": "acompte"}
+                    save_conv(phone, conv)
+                    send_whatsapp(phone_full, msg_list)
+                    return
+            
+            if intent_type == "ACTION_ENVOYER":
+                client = intent_data.get("client", "")
+                doc_type = intent_data.get("type_doc", "devis")
+                
+                if client:
+                    doc = find_document_by_client(client, entreprise["id"], doc_type)
+                    if doc and doc.get("pdf_url"):
+                        numero = doc.get("numero_devis") or doc.get("numero_facture")
+                        client_tel = doc.get("telephone_client", "")
+                        client_email = doc.get("client_email", "")
+                        
+                        # Stocker le document et proposer les options d'envoi
+                        conv["data"]["selected_doc"] = {
+                            "id": doc.get("id"),
+                            "numero": numero,
+                            "client": doc.get("client_nom"),
+                            "type": doc_type,
+                            "pdf_url": doc.get("pdf_url"),
+                            "total": float(doc.get("total_ttc", 0)),
+                            "client_tel": client_tel,
+                            "client_email": client_email,
+                        }
+                        conv["state"] = State.DOCUMENTS_DETAIL
+                        save_conv(phone, conv)
+                        
+                        menu = f"""📤 *Envoyer {doc_type} {numero}*
+👤 {doc.get('client_nom')} | 💰 {doc.get('total_ttc', 0):.0f}€
+
+*1.* 📱 WhatsApp"""
+                        if client_tel:
+                            menu += f" ({client_tel})"
+                        menu += f"\n*2.* 📧 Email"
+                        if client_email:
+                            menu += f" ({client_email})"
+                        menu += "\n*3.* 🏠 Menu"
+                        
+                        send_whatsapp(phone_full, menu)
+                        return
+            
+            if intent_type == "ACTION_MARQUER_PAYE":
+                client = intent_data.get("client", "")
+                if client:
+                    facture = find_document_by_client(client, entreprise["id"], "facture")
+                    if facture and facture.get("statut") != "payee":
+                        # Marquer comme payée
+                        try:
+                            supabase_client.table('factures')\
+                                .update({"statut": "payee"})\
+                                .eq('id', facture['id'])\
+                                .execute()
+                            send_whatsapp(phone_full, f"✅ *Facture {facture['numero_facture']} marquée payée !*")
+                            return
+                        except Exception as e:
+                            print(f"❌ Erreur marquage payée: {e}")
+            
+            if intent_type == "MENU":
+                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+                return
+            
+            # Si UNKNOWN et message assez long, proposer de l'aide
+            if intent_type == "UNKNOWN" and len(msg) > 10:
+                send_whatsapp(phone_full, f"""🤔 Je n'ai pas bien compris.
+
+Essayez :
+• "combien coûte le devis Dupont ?"
+• "mon CA ce mois"
+• "fais un acompte sur Dupont"
+• "envoie le devis à Martin"
+
+Ou tapez *menu* pour les options.""")
+                return
     
     # === BOUTONS DU MENU ===
     if button_payload:
@@ -4732,25 +5565,133 @@ Total : {selected['total_ttc']:.0f}€
         
         # === ENVOYER PAR EMAIL ===
         if msg_lower in ["2", "email"]:
-            if client_email:
-                # Envoyer directement au client enregistré
-                type_doc = "Devis" if is_devis else "Facture"
-                html = f"""<p>Bonjour,</p>
-<p>Veuillez trouver ci-joint votre {type_doc.lower()} n° <strong>{doc['numero']}</strong>.</p>
-<p>Montant : <strong>{doc.get('total', 0):.2f}€</strong></p>
-<p>Cordialement</p>"""
-                
-                if send_email_with_pdf(client_email, f"{type_doc} {doc['numero']}", html, doc["pdf_url"], f"{doc['numero']}.pdf"):
-                    send_whatsapp(phone_full, f"✅ *Email envoyé à {client_email}* !")
+            if is_devis:
+                # Pour un devis : proposer avec ou sans signature
+                if client_email:
+                    data["email_dest"] = client_email
+                    data["waiting_signature_choice"] = True
+                    conv["data"] = data
+                    save_conv(phone, conv)
+                    send_whatsapp(phone_full, f"""📧 *Envoi du devis à {client_email}*
+
+*1.* ✍️ Avec signature électronique
+*2.* 📄 Sans signature (PDF seul)
+*3.* ❌ Annuler""")
                 else:
-                    send_whatsapp(phone_full, f"❌ Erreur d'envoi à {client_email}")
+                    send_whatsapp(phone_full, "📧 Entrez l'adresse email :")
+                    data["waiting_email"] = True
+                    conv["data"] = data
+                    save_conv(phone, conv)
                 return
             else:
-                # Demander l'email
-                send_whatsapp(phone_full, "📧 Entrez l'adresse email :")
-                data["waiting_email"] = True
+                # Pour une facture : envoyer directement avec le beau template
+                if client_email:
+                    entreprise = get_entreprise(phone)
+                    if entreprise:
+                        if send_email_facture_pro(
+                            to_email=client_email,
+                            client_nom=doc.get("client", ""),
+                            entreprise_nom=entreprise.get("nom", ""),
+                            entreprise_email=entreprise.get("email", ""),
+                            entreprise_tel=entreprise.get("tel", ""),
+                            numero_facture=doc["numero"],
+                            titre_projet=doc.get("projet", ""),
+                            total_ttc=doc.get("total", 0),
+                            pdf_url=doc["pdf_url"],
+                            couleur=entreprise.get("couleur_pdf", "#2F665B")
+                        ):
+                            send_whatsapp(phone_full, f"✅ *Email envoyé à {client_email}* !")
+                        else:
+                            send_whatsapp(phone_full, f"❌ Erreur d'envoi")
+                    else:
+                        send_whatsapp(phone_full, f"❌ Erreur entreprise non trouvée")
+                else:
+                    send_whatsapp(phone_full, "📧 Entrez l'adresse email :")
+                    data["waiting_email"] = True
+                    conv["data"] = data
+                    save_conv(phone, conv)
+                return
+        
+        # === CHOIX SIGNATURE (après avoir tapé 2 pour email sur un devis) ===
+        if data.get("waiting_signature_choice"):
+            email_dest = data.get("email_dest", "")
+            
+            if msg_lower in ["1", "signature", "avec"]:
+                # Avec signature électronique
+                entreprise = get_entreprise(phone)
+                if entreprise:
+                    # Récupérer l'ID du devis depuis Supabase
+                    devis_id = doc.get("id")
+                    if not devis_id and supabase_client:
+                        try:
+                            result = supabase_client.table('devis')\
+                                .select('id')\
+                                .eq('numero_devis', doc['numero'])\
+                                .eq('entreprise_id', entreprise['id'])\
+                                .execute()
+                            if result.data and len(result.data) > 0:
+                                devis_id = result.data[0].get('id')
+                        except Exception as e:
+                            print(f"❌ Erreur récup ID devis: {e}")
+                    
+                    if devis_id:
+                        signature_url = f"https://www.vocario.fr/signer/{devis_id}"
+                        
+                        if send_email_devis_pro(
+                            to_email=email_dest,
+                            client_nom=doc.get("client", ""),
+                            entreprise_nom=entreprise.get("nom", ""),
+                            entreprise_email=entreprise.get("email", ""),
+                            entreprise_tel=entreprise.get("tel", ""),
+                            numero_devis=doc["numero"],
+                            titre_projet=doc.get("projet", ""),
+                            total_ttc=doc.get("total", 0),
+                            pdf_url=doc["pdf_url"],
+                            signature_url=signature_url,
+                            couleur=entreprise.get("couleur_pdf", "#2F665B")
+                        ):
+                            send_whatsapp(phone_full, f"✅ *Email avec signature envoyé à {email_dest}* !")
+                        else:
+                            send_whatsapp(phone_full, f"❌ Erreur d'envoi")
+                    else:
+                        send_whatsapp(phone_full, f"❌ Erreur : ID du devis non trouvé")
+                
+                data["waiting_signature_choice"] = False
                 conv["data"] = data
                 save_conv(phone, conv)
+                return
+            
+            elif msg_lower in ["2", "sans", "pdf"]:
+                # Sans signature - juste le PDF avec beau template
+                entreprise = get_entreprise(phone)
+                if entreprise:
+                    if send_email_devis_pro(
+                        to_email=email_dest,
+                        client_nom=doc.get("client", ""),
+                        entreprise_nom=entreprise.get("nom", ""),
+                        entreprise_email=entreprise.get("email", ""),
+                        entreprise_tel=entreprise.get("tel", ""),
+                        numero_devis=doc["numero"],
+                        titre_projet=doc.get("projet", ""),
+                        total_ttc=doc.get("total", 0),
+                        pdf_url=doc["pdf_url"],
+                        signature_url=None,  # Pas de signature
+                        couleur=entreprise.get("couleur_pdf", "#2F665B")
+                    ):
+                        send_whatsapp(phone_full, f"✅ *Email envoyé à {email_dest}* !")
+                    else:
+                        send_whatsapp(phone_full, f"❌ Erreur d'envoi")
+                
+                data["waiting_signature_choice"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                return
+            
+            elif msg_lower in ["3", "annuler", "cancel"]:
+                data["waiting_signature_choice"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, "❌ Annulé")
                 return
         
         # === ACTIONS DEVIS ===
