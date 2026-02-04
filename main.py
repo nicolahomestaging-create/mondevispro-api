@@ -3128,6 +3128,7 @@ def debug_env():
 # =============================================================================
 # =============================================================================
 # =============================================================================
+# =============================================================================
 # WEBHOOK WHATSAPP v6 - FLOW COMPLET STRUCTURÉ
 # =============================================================================
 #
@@ -3734,72 +3735,300 @@ def send_email_facture_pro(
 
 
 # =============================================================================
-# IA CONVERSATIONNELLE HYBRIDE
+# IA CONVERSATIONNELLE INTELLIGENTE AVEC MÉMOIRE
 # =============================================================================
 
-def analyze_intent(phone: str, message: str, entreprise: Dict) -> Dict:
+def ai_chat(phone: str, message: str, entreprise: Dict) -> Dict:
     """
-    Analyse l'intention de l'utilisateur avec Claude Haiku.
-    Retourne le type d'intention et les données extraites.
+    IA conversationnelle intelligente avec mémoire.
+    Retourne {"response": "texte"} ou {"action": "...", "data": {...}}
     """
     if not anthropic_client:
-        return {"type": "unknown"}
+        return {"response": "Service IA indisponible. Tapez *menu* pour les options."}
     
-    # Récupérer le contexte (derniers devis/factures)
+    # Récupérer la conversation et le contexte
+    conv = get_conv(phone)
+    chat_history = conv.get("data", {}).get("chat_history", [])
+    
+    # Récupérer les données de l'entreprise
     context = get_user_context(phone, entreprise)
     
-    prompt = f"""Tu es l'assistant IA de Vocario pour un artisan. Analyse ce message et détermine l'intention.
+    # Construire le prompt système
+    system_prompt = f"""Tu es l'assistant IA de Vocario pour {entreprise.get('nom', 'un artisan')}.
 
-CONTEXTE UTILISATEUR:
-- Entreprise: {entreprise.get('nom', 'Inconnue')}
-- Derniers devis: {context.get('derniers_devis', [])}
-- Dernières factures: {context.get('dernieres_factures', [])}
-- Stats du mois: {context.get('stats_mois', {})}
+## TON RÔLE
+Tu aides à gérer les devis et factures via WhatsApp. Tu dois être:
+- Naturel et conversationnel (pas robotique)
+- Concis (c'est WhatsApp, pas un email)
+- Proactif (propose des actions)
 
-MESSAGE: "{message}"
+## CONTEXTE ACTUEL
+Derniers devis: {json.dumps(context.get('derniers_devis', []), ensure_ascii=False)}
+Dernières factures: {json.dumps(context.get('dernieres_factures', []), ensure_ascii=False)}
+Stats du mois: {json.dumps(context.get('stats_mois', {}), ensure_ascii=False)}
 
-INTENTIONS POSSIBLES:
-1. QUESTION_PRIX - Demande le prix/montant d'un devis ou facture
-2. QUESTION_STATS - Demande des statistiques (CA, nombre de devis, etc.)
-3. QUESTION_STATUT - Demande le statut d'un document
-4. QUESTION_INFO - Question générale sur Vocario ou l'entreprise
-5. ACTION_DEVIS - Veut créer un devis
-6. ACTION_FACTURE - Veut créer une facture
-7. ACTION_ACOMPTE - Veut faire un acompte
-8. ACTION_ENVOYER - Veut envoyer un document
-9. ACTION_MARQUER_PAYE - Veut marquer comme payé
-10. MENU - Veut voir le menu
-11. SALUTATION - Dit bonjour/merci/etc.
-12. UNKNOWN - Pas compris
+## CE QUE TU PEUX FAIRE
+1. Répondre aux questions (prix, stats, statut)
+2. Déclencher des actions via JSON
 
-Retourne UNIQUEMENT un JSON valide:
-{{"type": "...", "data": {{"client": "...", "numero": "...", "periode": "..."}}}}
+## FORMAT DE RÉPONSE
+- Pour une réponse simple: écris juste le texte
+- Pour une action: retourne UNIQUEMENT un JSON comme ci-dessous
 
-Exemples:
-- "ça coute combien le devis dupont" → {{"type": "QUESTION_PRIX", "data": {{"client": "dupont"}}}}
-- "mon CA ce mois" → {{"type": "QUESTION_STATS", "data": {{"periode": "mois"}}}}
-- "fais un acompte 30% sur dupont" → {{"type": "ACTION_ACOMPTE", "data": {{"client": "dupont", "taux": 30}}}}
-- "envoie la facture à martin" → {{"type": "ACTION_ENVOYER", "data": {{"client": "martin", "type_doc": "facture"}}}}
-- "bonjour" → {{"type": "SALUTATION", "data": {{}}}}
-"""
+### Actions disponibles:
+{{"action": "show_devis", "numero": "DEV-xxx"}} - Afficher/envoyer un devis
+{{"action": "show_facture", "numero": "FAC-xxx"}} - Afficher/envoyer une facture  
+{{"action": "create_devis", "client": "nom"}} - Créer un devis
+{{"action": "create_acompte", "devis": "DEV-xxx", "taux": 30}} - Créer un acompte
+{{"action": "create_facture", "devis": "DEV-xxx"}} - Créer une facture finale
+{{"action": "send_email", "numero": "DEV-xxx", "email": "x@x.com", "signature": true}} - Envoyer par email
+{{"action": "send_whatsapp", "numero": "DEV-xxx", "tel": "06xxx"}} - Envoyer par WhatsApp
+{{"action": "mark_paid", "numero": "FAC-xxx"}} - Marquer comme payée
+{{"action": "show_menu"}} - Afficher le menu principal
 
+## RÈGLES
+- Si l'utilisateur dit "oui", "ok", "envoie", "montre" sans préciser quoi → utilise le dernier document mentionné dans la conversation
+- Si tu ne comprends pas → demande de préciser gentiment
+- Ne dis jamais "je ne peux pas", propose une alternative
+- Utilise des emojis avec modération
+- Tutoie l'utilisateur"""
+
+    # Ajouter le message à l'historique
+    chat_history.append({"role": "user", "content": message})
+    
+    # Limiter l'historique à 10 messages
+    chat_history = chat_history[-10:]
+    
     try:
         response = anthropic_client.messages.create(
             model="claude-3-haiku-20240307",
-            max_tokens=200,
-            messages=[{"role": "user", "content": prompt}]
+            max_tokens=500,
+            system=system_prompt,
+            messages=chat_history
         )
         
-        result = response.content[0].text.strip()
+        ai_response = response.content[0].text.strip()
         
-        # Parser le JSON
-        if result.startswith("{"):
-            import json
-            return json.loads(result)
+        # Ajouter la réponse à l'historique
+        chat_history.append({"role": "assistant", "content": ai_response})
+        
+        # Sauvegarder l'historique
+        conv["data"]["chat_history"] = chat_history
+        save_conv(phone, conv)
+        
+        # Parser la réponse
+        if ai_response.startswith("{") and "action" in ai_response:
+            try:
+                return json.loads(ai_response)
+            except:
+                pass
+        
+        return {"response": ai_response}
+        
     except Exception as e:
-        print(f"❌ Erreur analyse intention: {e}")
+        print(f"❌ Erreur IA: {e}")
+        return {"response": "Désolé, je n'ai pas compris. Tape *menu* pour voir les options."}
+
+
+def execute_ai_action(phone: str, action_data: Dict, entreprise: Dict) -> str:
+    """Exécute une action demandée par l'IA et retourne le message de confirmation"""
+    phone_full = f"+{phone}"
+    action = action_data.get("action", "")
+    entreprise_id = entreprise.get("id")
     
-    return {"type": "UNKNOWN", "data": {}}
+    print(f"🤖 Action IA: {action} | Data: {action_data}")
+    
+    # === AFFICHER UN DEVIS ===
+    if action == "show_devis":
+        numero = action_data.get("numero", "")
+        if supabase_client and numero:
+            try:
+                result = supabase_client.table('devis')\
+                    .select('*')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .ilike('numero_devis', f'%{numero}%')\
+                    .execute()
+                
+                if result.data and len(result.data) > 0:
+                    d = result.data[0]
+                    pdf_url = d.get("pdf_url", "")
+                    if pdf_url:
+                        send_whatsapp_document(phone_full, pdf_url, f"📋 Devis {d['numero_devis']}\n💰 {d['total_ttc']:.2f}€")
+                        return f"Voilà le devis {d['numero_devis']} ! Tu veux que je l'envoie au client ?"
+                    else:
+                        return f"Le devis {d['numero_devis']} n'a pas de PDF. Tu veux le régénérer ?"
+            except Exception as e:
+                print(f"❌ Erreur show_devis: {e}")
+        return "Je n'ai pas trouvé ce devis."
+    
+    # === AFFICHER UNE FACTURE ===
+    if action == "show_facture":
+        numero = action_data.get("numero", "")
+        if supabase_client and numero:
+            try:
+                result = supabase_client.table('factures')\
+                    .select('*')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .ilike('numero_facture', f'%{numero}%')\
+                    .execute()
+                
+                if result.data and len(result.data) > 0:
+                    f = result.data[0]
+                    pdf_url = f.get("pdf_url", "")
+                    if pdf_url:
+                        statut = "✅ Payée" if f.get("statut") == "payee" else "⏳ En attente"
+                        send_whatsapp_document(phone_full, pdf_url, f"🧾 Facture {f['numero_facture']} {statut}\n💰 {f['total_ttc']:.2f}€")
+                        return f"Voilà la facture ! {statut}"
+            except Exception as e:
+                print(f"❌ Erreur show_facture: {e}")
+        return "Je n'ai pas trouvé cette facture."
+    
+    # === CRÉER UN DEVIS ===
+    if action == "create_devis":
+        client = action_data.get("client", "")
+        conv = get_conv(phone)
+        conv["state"] = State.DEVIS_NOM
+        conv["data"]["client_nom"] = client if client else ""
+        if client:
+            conv["state"] = State.DEVIS_ADRESSE
+            save_conv(phone, conv)
+            return f"👍 Nouveau devis pour *{client}*\n\nQuelle est son adresse ? (ou tape *-* pour passer)"
+        save_conv(phone, conv)
+        return "👍 Nouveau devis !\n\nC'est pour quel client ?"
+    
+    # === CRÉER UN ACOMPTE ===
+    if action == "create_acompte":
+        devis_numero = action_data.get("devis", "")
+        taux = action_data.get("taux", 30)
+        
+        if supabase_client and devis_numero:
+            try:
+                result = supabase_client.table('devis')\
+                    .select('*')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .ilike('numero_devis', f'%{devis_numero}%')\
+                    .execute()
+                
+                if result.data and len(result.data) > 0:
+                    d = result.data[0]
+                    # Stocker et passer au flow de confirmation
+                    conv = get_conv(phone)
+                    conv["data"]["selected_devis"] = {
+                        "id": d.get("id"),
+                        "numero": d.get("numero_devis"),
+                        "client_nom": d.get("client_nom"),
+                        "total_ht": float(d.get("total_ht", 0)),
+                        "total_ttc": float(d.get("total_ttc", 0)),
+                    }
+                    conv["data"]["acompte_taux"] = taux
+                    conv["state"] = State.FACTURE_ACOMPTE_CONFIRM
+                    save_conv(phone, conv)
+                    
+                    montant = d["total_ttc"] * taux / 100
+                    return f"💰 Acompte de *{taux}%* sur {d['numero_devis']}\n\n👤 {d['client_nom']}\n💵 {montant:.2f}€\n\nJe génère ? (oui/non)"
+            except Exception as e:
+                print(f"❌ Erreur create_acompte: {e}")
+        return "Je n'ai pas trouvé ce devis pour l'acompte."
+    
+    # === ENVOYER PAR EMAIL ===
+    if action == "send_email":
+        numero = action_data.get("numero", "")
+        email = action_data.get("email", "")
+        signature = action_data.get("signature", False)
+        
+        if not email:
+            return "À quelle adresse email je l'envoie ?"
+        
+        # Trouver le document
+        is_devis = "DEV" in numero.upper()
+        table = "devis" if is_devis else "factures"
+        numero_field = "numero_devis" if is_devis else "numero_facture"
+        
+        if supabase_client:
+            try:
+                result = supabase_client.table(table)\
+                    .select('*')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .ilike(numero_field, f'%{numero}%')\
+                    .execute()
+                
+                if result.data and len(result.data) > 0:
+                    doc = result.data[0]
+                    pdf_url = doc.get("pdf_url", "")
+                    
+                    if is_devis and signature:
+                        signature_url = f"https://www.vocario.fr/signer/{doc['id']}"
+                        success = send_email_devis_pro(
+                            to_email=email,
+                            client_nom=doc.get("client_nom", ""),
+                            entreprise_nom=entreprise.get("nom", ""),
+                            entreprise_email=entreprise.get("email", ""),
+                            entreprise_tel=entreprise.get("tel", ""),
+                            numero_devis=doc.get("numero_devis", ""),
+                            titre_projet=doc.get("titre_projet", ""),
+                            total_ttc=float(doc.get("total_ttc", 0)),
+                            pdf_url=pdf_url,
+                            signature_url=signature_url,
+                            couleur=entreprise.get("couleur_pdf", "#2F665B")
+                        )
+                    elif is_devis:
+                        success = send_email_devis_pro(
+                            to_email=email,
+                            client_nom=doc.get("client_nom", ""),
+                            entreprise_nom=entreprise.get("nom", ""),
+                            entreprise_email=entreprise.get("email", ""),
+                            entreprise_tel=entreprise.get("tel", ""),
+                            numero_devis=doc.get("numero_devis", ""),
+                            titre_projet=doc.get("titre_projet", ""),
+                            total_ttc=float(doc.get("total_ttc", 0)),
+                            pdf_url=pdf_url,
+                            signature_url=None,
+                            couleur=entreprise.get("couleur_pdf", "#2F665B")
+                        )
+                    else:
+                        success = send_email_facture_pro(
+                            to_email=email,
+                            client_nom=doc.get("client_nom", ""),
+                            entreprise_nom=entreprise.get("nom", ""),
+                            entreprise_email=entreprise.get("email", ""),
+                            entreprise_tel=entreprise.get("tel", ""),
+                            numero_facture=doc.get("numero_facture", ""),
+                            titre_projet=doc.get("titre_projet", ""),
+                            total_ttc=float(doc.get("total_ttc", 0)),
+                            pdf_url=pdf_url,
+                            couleur=entreprise.get("couleur_pdf", "#2F665B")
+                        )
+                    
+                    if success:
+                        return f"✅ Email envoyé à {email} !"
+                    else:
+                        return f"❌ Erreur lors de l'envoi à {email}"
+            except Exception as e:
+                print(f"❌ Erreur send_email: {e}")
+        return "Je n'ai pas trouvé ce document."
+    
+    # === MARQUER PAYÉE ===
+    if action == "mark_paid":
+        numero = action_data.get("numero", "")
+        if supabase_client and numero:
+            try:
+                result = supabase_client.table('factures')\
+                    .update({"statut": "payee"})\
+                    .ilike('numero_facture', f'%{numero}%')\
+                    .eq('entreprise_id', entreprise_id)\
+                    .execute()
+                return f"✅ Facture {numero} marquée payée !"
+            except Exception as e:
+                print(f"❌ Erreur mark_paid: {e}")
+        return "Je n'ai pas pu marquer cette facture comme payée."
+    
+    # === MENU ===
+    if action == "show_menu":
+        send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+        return None  # Pas de message supplémentaire
+    
+    return "Je n'ai pas compris cette action."
+
 
 
 def get_user_context(phone: str, entreprise: Dict) -> Dict:
@@ -4749,190 +4978,24 @@ def handle_message(phone: str, message: str, button_payload: str = None):
         send_whatsapp(phone_full, "❌ Annulé.\n\nTapez *menu* pour recommencer.")
         return
     
-    # === IA HYBRIDE : Analyse d'intention pour messages en texte libre ===
-    # Seulement si on est au menu principal et pas en train de suivre un flow guidé
-    # Et si ce n'est pas un bouton ou un chiffre simple
-    if state == State.MENU and not button_payload and not msg_lower.isdigit() and len(msg) > 2:
+    # === IA CONVERSATIONNELLE : Mode intelligent ===
+    # Actif quand on est au menu et que c'est pas un bouton ou un chiffre simple
+    if state == State.MENU and not button_payload and not msg_lower.isdigit() and len(msg) > 1:
         entreprise = get_entreprise(phone)
         if entreprise:
-            # Analyser l'intention avec Claude
-            intent = analyze_intent(phone, msg, entreprise)
-            intent_type = intent.get("type", "UNKNOWN")
-            intent_data = intent.get("data", {})
+            # Appeler l'IA conversationnelle
+            result = ai_chat(phone, msg, entreprise)
             
-            print(f"🤖 Intent: {intent_type} | Data: {intent_data}")
-            
-            # === QUESTIONS : Répondre directement ===
-            if intent_type.startswith("QUESTION_") or intent_type == "SALUTATION":
-                response = handle_question(phone, intent, entreprise)
+            if "action" in result:
+                # L'IA veut exécuter une action
+                response = execute_ai_action(phone, result, entreprise)
                 if response:
                     send_whatsapp(phone_full, response)
-                    return
+            elif "response" in result:
+                # L'IA répond directement
+                send_whatsapp(phone_full, result["response"])
             
-            # === ACTIONS : Rediriger vers le flow guidé approprié ===
-            if intent_type == "ACTION_DEVIS":
-                # Démarrer le flow devis
-                conv["state"] = State.DEVIS_NOM
-                conv["data"] = {}
-                # Si un client est mentionné, pré-remplir
-                if intent_data.get("client"):
-                    conv["data"]["client_nom"] = intent_data["client"].title()
-                    conv["state"] = State.DEVIS_ADRESSE
-                    save_conv(phone, conv)
-                    send_whatsapp(phone_full, f"""📝 *NOUVEAU DEVIS*
-
-👤 Client : *{conv['data']['client_nom']}*
-
-*Étape 2/6* - Adresse (optionnel)
-
-Entrez l'adresse ou tapez *-* pour passer.""")
-                    return
-                save_conv(phone, conv)
-                send_whatsapp(phone_full, """📝 *NOUVEAU DEVIS*
-
-━━━━━━━━━━━━━━━━━━
-*Étape 1/6* - Nom du client
-━━━━━━━━━━━━━━━━━━
-
-Quel est le *nom du client* ?
-
-_Exemple: M. Dupont_""")
-                return
-            
-            if intent_type == "ACTION_ACOMPTE":
-                # Chercher le devis du client mentionné
-                client = intent_data.get("client", "")
-                taux = intent_data.get("taux")
-                
-                if client:
-                    devis = find_document_by_client(client, entreprise["id"], "devis")
-                    if devis:
-                        # Stocker le devis et aller directement au choix du taux
-                        devis_data = {
-                            "id": devis.get("id"),
-                            "numero": devis.get("numero_devis"),
-                            "client_nom": devis.get("client_nom"),
-                            "total_ht": float(devis.get("total_ht", 0)),
-                            "total_ttc": float(devis.get("total_ttc", 0)),
-                        }
-                        conv["data"] = {"selected_devis": devis_data}
-                        
-                        # Si taux spécifié, générer directement
-                        if taux and 1 <= taux <= 90:
-                            conv["data"]["acompte_taux"] = taux
-                            conv["state"] = State.FACTURE_ACOMPTE_CONFIRM
-                            montant = devis_data["total_ttc"] * taux / 100
-                            save_conv(phone, conv)
-                            send_whatsapp(phone_full, f"""💰 *FACTURE D'ACOMPTE*
-
-📋 Devis : {devis_data['numero']}
-👤 Client : {devis_data['client_nom']}
-💵 Total devis : {devis_data['total_ttc']:.2f}€
-
-📊 Acompte : *{taux}%* = *{montant:.2f}€*
-
-Confirmez avec *OK* ou tapez *annuler*""")
-                            return
-                        
-                        # Sinon proposer les taux
-                        conv["state"] = State.FACTURE_ACOMPTE_TAUX
-                        save_conv(phone, conv)
-                        send_whatsapp(phone_full, f"""💰 *ACOMPTE - {devis_data['client_nom']}*
-
-📋 Devis : {devis_data['numero']}
-💵 Total : {devis_data['total_ttc']:.2f}€
-
-Quel pourcentage ?
-
-*1.* 30% = {devis_data['total_ttc']*0.30:.2f}€
-*2.* 40% = {devis_data['total_ttc']*0.40:.2f}€
-*3.* 50% = {devis_data['total_ttc']*0.50:.2f}€
-*4.* Autre pourcentage""")
-                        return
-                
-                # Sinon, afficher la liste des devis
-                devis_list = get_devis_pour_facturation(phone)
-                if devis_list:
-                    msg_list = "💰 *FACTURE D'ACOMPTE*\n\nSur quel devis ?\n\n"
-                    for i, d in enumerate(devis_list, 1):
-                        msg_list += f"*{i}.* {d['numero']} | {d['client_nom']} | {d['total_ttc']:.0f}€\n"
-                    conv["state"] = State.FACTURE_LISTE
-                    conv["data"] = {"devis_list": devis_list, "facture_type": "acompte"}
-                    save_conv(phone, conv)
-                    send_whatsapp(phone_full, msg_list)
-                    return
-            
-            if intent_type == "ACTION_ENVOYER":
-                client = intent_data.get("client", "")
-                doc_type = intent_data.get("type_doc", "devis")
-                
-                if client:
-                    doc = find_document_by_client(client, entreprise["id"], doc_type)
-                    if doc and doc.get("pdf_url"):
-                        numero = doc.get("numero_devis") or doc.get("numero_facture")
-                        client_tel = doc.get("telephone_client", "")
-                        client_email = doc.get("client_email", "")
-                        
-                        # Stocker le document et proposer les options d'envoi
-                        conv["data"]["selected_doc"] = {
-                            "id": doc.get("id"),
-                            "numero": numero,
-                            "client": doc.get("client_nom"),
-                            "type": doc_type,
-                            "pdf_url": doc.get("pdf_url"),
-                            "total": float(doc.get("total_ttc", 0)),
-                            "client_tel": client_tel,
-                            "client_email": client_email,
-                        }
-                        conv["state"] = State.DOCUMENTS_DETAIL
-                        save_conv(phone, conv)
-                        
-                        menu = f"""📤 *Envoyer {doc_type} {numero}*
-👤 {doc.get('client_nom')} | 💰 {doc.get('total_ttc', 0):.0f}€
-
-*1.* 📱 WhatsApp"""
-                        if client_tel:
-                            menu += f" ({client_tel})"
-                        menu += f"\n*2.* 📧 Email"
-                        if client_email:
-                            menu += f" ({client_email})"
-                        menu += "\n*3.* 🏠 Menu"
-                        
-                        send_whatsapp(phone_full, menu)
-                        return
-            
-            if intent_type == "ACTION_MARQUER_PAYE":
-                client = intent_data.get("client", "")
-                if client:
-                    facture = find_document_by_client(client, entreprise["id"], "facture")
-                    if facture and facture.get("statut") != "payee":
-                        # Marquer comme payée
-                        try:
-                            supabase_client.table('factures')\
-                                .update({"statut": "payee"})\
-                                .eq('id', facture['id'])\
-                                .execute()
-                            send_whatsapp(phone_full, f"✅ *Facture {facture['numero_facture']} marquée payée !*")
-                            return
-                        except Exception as e:
-                            print(f"❌ Erreur marquage payée: {e}")
-            
-            if intent_type == "MENU":
-                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
-                return
-            
-            # Si UNKNOWN et message assez long, proposer de l'aide
-            if intent_type == "UNKNOWN" and len(msg) > 10:
-                send_whatsapp(phone_full, f"""🤔 Je n'ai pas bien compris.
-
-Essayez :
-• "combien coûte le devis Dupont ?"
-• "mon CA ce mois"
-• "fais un acompte sur Dupont"
-• "envoie le devis à Martin"
-
-Ou tapez *menu* pour les options.""")
-                return
+            return
     
     # === BOUTONS DU MENU ===
     if button_payload:
@@ -5543,6 +5606,88 @@ Total : {selected['total_ttc']:.0f}€
         client_tel = doc.get("client_tel") or ""
         client_email = doc.get("client_email") or ""
         
+        # === CHOIX SIGNATURE (PRIORITAIRE - après avoir tapé 2 pour email sur un devis) ===
+        if data.get("waiting_signature_choice"):
+            email_dest = data.get("email_dest", "")
+            
+            if msg_lower in ["1", "signature", "avec"]:
+                # Avec signature électronique
+                entreprise = get_entreprise(phone)
+                if entreprise:
+                    # Récupérer l'ID du devis depuis Supabase
+                    devis_id = doc.get("id")
+                    if not devis_id and supabase_client:
+                        try:
+                            result = supabase_client.table('devis')\
+                                .select('id')\
+                                .eq('numero_devis', doc['numero'])\
+                                .eq('entreprise_id', entreprise['id'])\
+                                .execute()
+                            if result.data and len(result.data) > 0:
+                                devis_id = result.data[0].get('id')
+                        except Exception as e:
+                            print(f"❌ Erreur récup ID devis: {e}")
+                    
+                    if devis_id:
+                        signature_url = f"https://www.vocario.fr/signer/{devis_id}"
+                        
+                        if send_email_devis_pro(
+                            to_email=email_dest,
+                            client_nom=doc.get("client", ""),
+                            entreprise_nom=entreprise.get("nom", ""),
+                            entreprise_email=entreprise.get("email", ""),
+                            entreprise_tel=entreprise.get("tel", ""),
+                            numero_devis=doc["numero"],
+                            titre_projet=doc.get("projet", ""),
+                            total_ttc=doc.get("total", 0),
+                            pdf_url=doc["pdf_url"],
+                            signature_url=signature_url,
+                            couleur=entreprise.get("couleur_pdf", "#2F665B")
+                        ):
+                            send_whatsapp(phone_full, f"✅ *Email avec signature envoyé à {email_dest}* !")
+                        else:
+                            send_whatsapp(phone_full, f"❌ Erreur d'envoi email")
+                    else:
+                        send_whatsapp(phone_full, f"❌ Erreur : ID du devis non trouvé")
+                
+                data["waiting_signature_choice"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                return
+            
+            elif msg_lower in ["2", "sans", "pdf"]:
+                # Sans signature - juste le PDF avec beau template
+                entreprise = get_entreprise(phone)
+                if entreprise:
+                    if send_email_devis_pro(
+                        to_email=email_dest,
+                        client_nom=doc.get("client", ""),
+                        entreprise_nom=entreprise.get("nom", ""),
+                        entreprise_email=entreprise.get("email", ""),
+                        entreprise_tel=entreprise.get("tel", ""),
+                        numero_devis=doc["numero"],
+                        titre_projet=doc.get("projet", ""),
+                        total_ttc=doc.get("total", 0),
+                        pdf_url=doc["pdf_url"],
+                        signature_url=None,  # Pas de signature
+                        couleur=entreprise.get("couleur_pdf", "#2F665B")
+                    ):
+                        send_whatsapp(phone_full, f"✅ *Email envoyé à {email_dest}* !")
+                    else:
+                        send_whatsapp(phone_full, f"❌ Erreur d'envoi email")
+                
+                data["waiting_signature_choice"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                return
+            
+            elif msg_lower in ["3", "annuler", "cancel"]:
+                data["waiting_signature_choice"] = False
+                conv["data"] = data
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, "❌ Annulé")
+                return
+        
         # === ENVOYER PAR WHATSAPP ===
         if msg_lower in ["1", "whatsapp", "envoyer"]:
             if client_tel:
@@ -5610,88 +5755,6 @@ Total : {selected['total_ttc']:.0f}€
                     data["waiting_email"] = True
                     conv["data"] = data
                     save_conv(phone, conv)
-                return
-        
-        # === CHOIX SIGNATURE (après avoir tapé 2 pour email sur un devis) ===
-        if data.get("waiting_signature_choice"):
-            email_dest = data.get("email_dest", "")
-            
-            if msg_lower in ["1", "signature", "avec"]:
-                # Avec signature électronique
-                entreprise = get_entreprise(phone)
-                if entreprise:
-                    # Récupérer l'ID du devis depuis Supabase
-                    devis_id = doc.get("id")
-                    if not devis_id and supabase_client:
-                        try:
-                            result = supabase_client.table('devis')\
-                                .select('id')\
-                                .eq('numero_devis', doc['numero'])\
-                                .eq('entreprise_id', entreprise['id'])\
-                                .execute()
-                            if result.data and len(result.data) > 0:
-                                devis_id = result.data[0].get('id')
-                        except Exception as e:
-                            print(f"❌ Erreur récup ID devis: {e}")
-                    
-                    if devis_id:
-                        signature_url = f"https://www.vocario.fr/signer/{devis_id}"
-                        
-                        if send_email_devis_pro(
-                            to_email=email_dest,
-                            client_nom=doc.get("client", ""),
-                            entreprise_nom=entreprise.get("nom", ""),
-                            entreprise_email=entreprise.get("email", ""),
-                            entreprise_tel=entreprise.get("tel", ""),
-                            numero_devis=doc["numero"],
-                            titre_projet=doc.get("projet", ""),
-                            total_ttc=doc.get("total", 0),
-                            pdf_url=doc["pdf_url"],
-                            signature_url=signature_url,
-                            couleur=entreprise.get("couleur_pdf", "#2F665B")
-                        ):
-                            send_whatsapp(phone_full, f"✅ *Email avec signature envoyé à {email_dest}* !")
-                        else:
-                            send_whatsapp(phone_full, f"❌ Erreur d'envoi")
-                    else:
-                        send_whatsapp(phone_full, f"❌ Erreur : ID du devis non trouvé")
-                
-                data["waiting_signature_choice"] = False
-                conv["data"] = data
-                save_conv(phone, conv)
-                return
-            
-            elif msg_lower in ["2", "sans", "pdf"]:
-                # Sans signature - juste le PDF avec beau template
-                entreprise = get_entreprise(phone)
-                if entreprise:
-                    if send_email_devis_pro(
-                        to_email=email_dest,
-                        client_nom=doc.get("client", ""),
-                        entreprise_nom=entreprise.get("nom", ""),
-                        entreprise_email=entreprise.get("email", ""),
-                        entreprise_tel=entreprise.get("tel", ""),
-                        numero_devis=doc["numero"],
-                        titre_projet=doc.get("projet", ""),
-                        total_ttc=doc.get("total", 0),
-                        pdf_url=doc["pdf_url"],
-                        signature_url=None,  # Pas de signature
-                        couleur=entreprise.get("couleur_pdf", "#2F665B")
-                    ):
-                        send_whatsapp(phone_full, f"✅ *Email envoyé à {email_dest}* !")
-                    else:
-                        send_whatsapp(phone_full, f"❌ Erreur d'envoi")
-                
-                data["waiting_signature_choice"] = False
-                conv["data"] = data
-                save_conv(phone, conv)
-                return
-            
-            elif msg_lower in ["3", "annuler", "cancel"]:
-                data["waiting_signature_choice"] = False
-                conv["data"] = data
-                save_conv(phone, conv)
-                send_whatsapp(phone_full, "❌ Annulé")
                 return
         
         # === ACTIONS DEVIS ===
