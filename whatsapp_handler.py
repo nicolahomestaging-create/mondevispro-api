@@ -1774,9 +1774,15 @@ _Tapez *retour* pour modifier_""")
             send_whatsapp(phone_full, "❌ Je n'ai pas compris les prestations.\n\nEssayez comme ça :\n_Carrelage 30m² 50€_\n_Peinture forfait 800€_")
             return
         
+        # APPEND aux prestations existantes (si "Ajouter une prestation")
+        existing = data.get("_prestations_precedentes", [])
+        if existing:
+            prestations = existing + prestations
+            data.pop("_prestations_precedentes", None)  # Nettoyer le flag
+        
         data["prestations"] = prestations
         
-        # Calculer total HT
+        # Calculer total HT sur TOUTES les prestations
         total_ht = sum(p.get("quantite", 1) * p.get("prix_unitaire", 0) for p in prestations)
         
         # Afficher les prestations parsées
@@ -1821,6 +1827,9 @@ Souhaitez-vous ajouter :
             return
         
         if msg_lower in ["3", "refaire"]:
+            data.pop("_prestations_precedentes", None)
+            data.pop("prestations", None)
+            conv["data"] = data
             conv["state"] = State.DEVIS_PRESTATIONS
             save_conv(phone, conv)
             handle_message(phone, "__show__")
