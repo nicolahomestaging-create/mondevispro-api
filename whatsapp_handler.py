@@ -909,6 +909,30 @@ def handle_message(phone: str, message: str, media_url: str = None, media_type: 
         send_whatsapp(phone_full, "❌ Annulé.\n\n_Tapez *menu* pour recommencer._")
         return
     
+    # ── Raccourcis globaux : boutons template fonctionnent depuis n'importe quel écran ──
+    # On reset et redirige vers le MENU qui gère la logique
+    
+    if state != State.MENU:
+        is_global_shortcut = False
+        
+        if button_payload in ["nouveau_devis", "new_devis", "Nouveau devis"]:
+            is_global_shortcut = True
+        elif button_payload in ["nouvelle_facture", "new_facture", "Nouvelle facture"]:
+            is_global_shortcut = True
+        elif button_payload in ["mes_documents", "documents", "Mes documents"]:
+            is_global_shortcut = True
+        elif msg_lower in ["nouveau devis", "créer devis", "nouvelle facture", "créer facture", "mes documents", "documents", "mes docs", "docs", "facture"]:
+            is_global_shortcut = True
+        
+        if is_global_shortcut:
+            reset_conv(phone)
+            conv = get_conv(phone)
+            conv["state"] = State.MENU
+            save_conv(phone, conv)
+            # Relancer handle_message depuis l'état MENU
+            handle_message(phone, message, button_payload=button_payload)
+            return
+    
     if msg_lower == "retour":
         retour_map = {
             State.DEVIS_TEL: State.DEVIS_NOM,
