@@ -935,7 +935,125 @@ _Tapez *menu* pour revenir_"""
 
 
 # =============================================================================
-# IA - PARSING PRESTATIONS (Claude Haiku - chirurgical)
+# PARSING PRESTATIONS - REGEX LOCAL (rapide, pas d'API)
+# =============================================================================
+
+def parse_prestations_regex(texte: str) -> List[Dict]:
+    """Parse prestations avec regex — couvre 80% des cas simples, 0 latence"""
+    prestations = []
+    
+    # Normaliser le texte
+    texte_clean = texte.replace("€", " €").replace("  ", " ").strip()
+    
+    # Séparer par lignes OU par "+" ou "et" en début de ligne
+    lines = re.split(r'\n|(?:^|\s)\+\s', texte_clean)
+    
+    for line in lines:
+        line = line.strip()
+        if not line or len(line) < 3:
+            continue
+        
+        # Pattern 1: "Carrelage 30m2 50€" ou "Carrelage 30 m² à 50€" ou "Carrelage 30m2 x 50€"
+        m = re.match(
+            r'(.+?)\s+(\d+[.,]?\d*)\s*(m2|m²|ml|m|h|u|jours?|kg|l)\s*(?:[xX×àa@]\s*)?(\d+[.,]?\d*)\s*€?',
+            line, re.IGNORECASE
+        )
+        if m:
+            desc = m.group(1).strip().rstrip('-–—:').strip()
+            qte = float(m.group(2).replace(',', '.'))
+            unite = m.group(3).lower().replace('m2', 'm²').rstrip('s')
+            prix = float(m.group(4).replace(',', '.'))
+            if desc and prix > 0:
+                prestations.append({"description": desc.capitalize(), "quantite": qte, "unite": unite, "prix_unitaire": prix})
+                continue
+        
+        # Pattern 2: "Peinture forfait 800€" ou "Peinture 800€"
+        m = re.match(
+            r'(.+?)\s+(?:forfait\s+)?(\d+[.,]?\d*)\s*€',
+            line, re.IGNORECASE
+        )
+        if m:
+            desc = m.group(1).strip().rstrip('-–—:').strip()
+            prix = float(m.group(2).replace(',', '.'))
+            # Vérifier que desc n'est pas juste un nombre
+            if desc and not desc.replace(' ', '').isdigit() and prix > 0:
+                prestations.append({"description": desc.capitalize(), "quantite": 1, "unite": "forfait", "prix_unitaire": prix})
+                continue
+        
+        # Pattern 3: "800€ peinture" ou "800 euros peinture salon"
+        m = re.match(
+            r'(\d+[.,]?\d*)\s*(?:€|euros?)\s+(.+)',
+            line, re.IGNORECASE
+        )
+        if m:
+            prix = float(m.group(1).replace(',', '.'))
+            desc = m.group(2).strip()
+            if desc and prix > 0:
+                prestations.append({"description": desc.capitalize(), "quantite": 1, "unite": "forfait", "prix_unitaire": prix})
+                continue
+    
+    # Si aucune ligne n'a matché, essayer le texte entier comme une seule prestation
+    if not prestations:
+        for pattern_fn in [
+            # "carrelage 30m2 50€"
+            lambda t: re.match(r'(.+?)\s+(\d+[.,]?\d*)\s*(m2|m²|ml|m|h|u|jours?|kg|l)\s*(?:[xX×àa@]\s*)?(\d+[.,]?\d*)\s*€?', t, re.IGNORECASE),
+            # "peinture 800€"
+            lambda t: re.match(r'(.+?)\s+(?:forfait\s+)?(\d+[.,]?\d*)\s*€', t, re.IGNORECASE),
+        ]:
+            m = pattern_fn(texte_clean)
+            if m:
+                groups = m.groups()
+                if len(groups) == 4:
+                    prestations.append({"description": groups[0].strip().capitalize(), "quantite": float(groups[1].replace(',','.')), "unite": groups[2].lower().replace('m2','m²'), "prix_unitaire": float(groups[3].replace(',','.'))})
+                elif len(groups) == 2:
+                    desc = groups[0].strip()
+                    if desc and not desc.replace(' ','').isdigit():
+                        prestations.append({"description": desc.capitalize(), "quantite": 1, "unite": "forfait", "prix_unitaire": float(groups[1].replace(',','.'))})
+                break
+    
+    return prestations
+
+
+def parse_express_devis(texte: str) -> Optional[Dict]:
+    """
+    Détecte et parse un devis express en un seul message.
+    Format: "Dupont 0612345678 carrelage 30m2 50€"
+    Retourne dict {client_nom, client_tel, prestations} ou None
+    """
+    # Chercher un numéro de téléphone dans le message
+    phone_match = re.search(r'(0\d[\s.]?\d{2}[\s.]?\d{2}[\s.]?\d{2}[\s.]?\d{2})', texte)
+    # Chercher un prix
+    price_match = re.search(r'\d+[.,]?\d*\s*€', texte)
+    
+    if not phone_match or not price_match:
+        return None
+    
+    tel = re.sub(r'[^0-9]', '', phone_match.group(1))
+    if len(tel) < 10:
+        return None
+    
+    # Tout ce qui est AVANT le téléphone = nom du client
+    before_phone = texte[:phone_match.start()].strip()
+    # Tout ce qui est APRÈS le téléphone = prestations
+    after_phone = texte[phone_match.end():].strip()
+    
+    if not before_phone or not after_phone:
+        return None
+    
+    # Parser les prestations de la partie après le téléphone
+    prestations = parse_prestations_regex(after_phone)
+    if not prestations:
+        return None
+    
+    return {
+        "client_nom": before_phone.strip().title(),
+        "client_tel": tel,
+        "prestations": prestations,
+    }
+
+
+# =============================================================================
+# IA - PARSING PRESTATIONS (Claude Haiku - fallback)
 # =============================================================================
 
 def parse_prestations_ia(texte: str) -> List[Dict]:
@@ -1220,13 +1338,14 @@ def handle_message(phone: str, message: str, media_url: str = None, media_type: 
     # Audio → transcription Whisper
     if media_url and media_type and ("audio" in media_type or "ogg" in media_type):
         logger.info(f"Message vocal de {phone}")
+        send_whatsapp(phone_full, "🎤 _Transcription en cours..._")
         transcribed = transcribe_audio(media_url)
         if transcribed:
             msg = transcribed
             msg_lower = msg.lower()
             send_whatsapp(phone_full, f"🎤 _\"{msg}\"_")
         else:
-            send_whatsapp(phone_full, "❌ Impossible de comprendre le vocal. Réessayez ou écrivez.\n\n_Tapez *menu* pour le menu principal_")
+            send_whatsapp(phone_full, "⚠️ Impossible de comprendre le vocal.\n\n_Réessayez en parlant plus fort, ou écrivez votre message._")
             return
     
     if not msg and not button_payload:
@@ -1332,12 +1451,15 @@ _Tapez *menu* pour revenir_""")
     if msg_lower == "retour":
         retour_map = {
             State.DEVIS_TEL: State.DEVIS_NOM,
-            State.DEVIS_EMAIL: State.DEVIS_TEL,
-            State.DEVIS_ADRESSE: State.DEVIS_EMAIL,
-            State.DEVIS_PROJET: State.DEVIS_ADRESSE,
-            State.DEVIS_PRESTATIONS: State.DEVIS_PROJET,
-            State.DEVIS_OPTIONS: State.DEVIS_PRESTATIONS,
-            State.DEVIS_RECAP: State.DEVIS_OPTIONS,
+            State.DEVIS_PRESTATIONS: State.DEVIS_TEL,
+            State.DEVIS_RECAP: State.DEVIS_PRESTATIONS,
+            # Depuis enrichissement récap → retour au récap
+            State.DEVIS_EMAIL: State.DEVIS_RECAP,
+            State.DEVIS_ADRESSE: State.DEVIS_RECAP,
+            State.DEVIS_PROJET: State.DEVIS_RECAP,
+            State.DEVIS_REMISE: State.DEVIS_RECAP,
+            State.DEVIS_ACOMPTE: State.DEVIS_RECAP,
+            State.DEVIS_DELAI: State.DEVIS_RECAP,
             State.DOCS_DETAIL: State.DOCS_LISTE,
         }
         if state in retour_map:
@@ -1393,14 +1515,11 @@ _Tapez *menu* pour revenir_""")
             save_conv(phone, conv)
             send_whatsapp(phone_full, """📝 *NOUVEAU DEVIS*
 
-━━━━━━━━━━━━━━━━━━
-*Étape 1/7* - Nom du client
-━━━━━━━━━━━━━━━━━━
-
-Quel est le *nom du client* ?
+👤 Quel est le *nom du client* ?
 
 _Exemple: M. Dupont_
-_Tapez *annuler* pour annuler_""")
+_ou envoyez tout d'un coup :_
+_Dupont 0612345678 carrelage 30m² 50€_""")
             return
         
         if button_payload in ["nouvelle_facture", "new_facture", "Nouvelle facture"] or msg_lower in ["2", "facture", "nouvelle facture"]:
@@ -1526,33 +1645,48 @@ _Tapez *annuler* pour annuler_""")
             conv["state"] = State.DEVIS_NOM
             conv["data"] = {}
             save_conv(phone, conv)
-            send_whatsapp(phone_full, "📝 *Étape 1/7* - Nom du client\n\nQuel est le *nom du client* ?")
+            send_whatsapp(phone_full, "👤 *Nom du client ?*\n\n_Ou envoyez tout en un message :_\n_Dupont 0612345678 carrelage 30m² 50€_")
             return
         # Sélection par numéro
         try:
             idx = int(msg) - 1
             if 0 <= idx < len(clients):
                 selected = clients[idx]
-                # Pré-remplir les données du client → sauter directement au projet
+                # Pré-remplir les données du client → sauter directement aux prestations
                 conv["data"] = {
                     "client_nom": selected["nom"],
                     "client_tel": selected.get("tel", ""),
                     "client_email": selected.get("email", ""),
                     "client_adresse": selected.get("adresse", ""),
                 }
-                conv["state"] = State.DEVIS_PROJET
+                conv["state"] = State.DEVIS_PRESTATIONS
                 save_conv(phone, conv)
-                send_whatsapp(phone_full, f"""✅ Client sélectionné : *{selected['nom']}*
+                
+                # Suggestions de prestations favorites (Business)
+                favorites_msg = ""
+                entreprise = get_entreprise(phone)
+                if entreprise and is_business(entreprise):
+                    favs = get_frequent_prestations(entreprise["id"])
+                    if favs:
+                        fav_lines = ["\n💡 *Vos prestations habituelles :*"]
+                        for i, f in enumerate(favs[:3], 1):
+                            fav_lines.append(f"*F{i}.* {f['description']} | {f['prix_unitaire']:.0f}€/{f['unite']}")
+                        fav_lines.append("_Tapez F1, F2... pour les ajouter_")
+                        favorites_msg = "\n".join(fav_lines)
+                        conv["data"]["_favorites"] = favs[:3]
+                        save_conv(phone, conv)
+                
+                send_whatsapp(phone_full, f"""✅ Client : *{selected['nom']}*
 {('📞 ' + selected['tel']) if selected.get('tel') else ''}
 {('📧 ' + selected['email']) if selected.get('email') else ''}
 
-━━━━━━━━━━━━━━━━━━
-*Étape 5/7* - Nom du projet
-━━━━━━━━━━━━━━━━━━
+🔨 *Décrivez les travaux avec les prix :*
 
-Quel est le *nom du projet* ?
+_Exemples :_
+• _Carrelage 30m² 50€_
+• _Peinture salon forfait 800€_
 
-_Exemple: Rénovation salle de bain_""")
+Envoyez tout en un message ou un vocal 🎤{favorites_msg}""")
                 return
         except ValueError:
             pass
@@ -1562,30 +1696,52 @@ _Exemple: Rénovation salle de bain_""")
         save_conv(phone, conv)
         send_whatsapp(phone_full, f"""✅ Client : *{msg}*
 
-━━━━━━━━━━━━━━━━━━
-*Étape 2/7* - Téléphone
-━━━━━━━━━━━━━━━━━━
-
-Quel est son *numéro de téléphone* ?
+📞 *Numéro de téléphone ?*
 
 _Exemple: 06 12 34 56 78_""")
         return
     
     if state == State.DEVIS_NOM:
         if msg == "__show__":
-            send_whatsapp(phone_full, "📝 *Étape 1/7* - Nom du client\n\nQuel est le *nom du client* ?")
+            send_whatsapp(phone_full, "👤 *Nom du client ?*\n\n_Ou envoyez tout en un message :_\n_Dupont 0612345678 carrelage 30m² 50€_")
             return
+        
+        # Mode express : détecter nom + tél + prestations en un message
+        express = parse_express_devis(msg)
+        if express:
+            data["client_nom"] = express["client_nom"]
+            data["client_tel"] = express["client_tel"]
+            data["prestations"] = express["prestations"]
+            conv["data"] = data
+            
+            total_ht = sum(p["quantite"] * p["prix_unitaire"] for p in express["prestations"])
+            presta_lines = []
+            for p in express["prestations"]:
+                t = p["quantite"] * p["prix_unitaire"]
+                if p["quantite"] == 1 and p["unite"] in ["forfait", "u"]:
+                    presta_lines.append(f"• {p['description']} = {t:.0f}€")
+                else:
+                    presta_lines.append(f"• {p['description']} {p['quantite']} {p['unite']} × {p['prix_unitaire']:.0f}€ = {t:.0f}€")
+            
+            send_whatsapp(phone_full, f"""⚡ *Mode express !*
+
+👤 {express['client_nom']}
+📞 {express['client_tel']}
+{chr(10).join(presta_lines)}
+
+💰 *Total HT : {total_ht:.2f}€*""")
+            
+            # Aller directement au récap
+            _show_recap(phone, phone_full, conv)
+            return
+        
         data["client_nom"] = msg
         conv["data"] = data
         conv["state"] = State.DEVIS_TEL
         save_conv(phone, conv)
         send_whatsapp(phone_full, f"""✅ Client : *{msg}*
 
-━━━━━━━━━━━━━━━━━━
-*Étape 2/7* - Téléphone
-━━━━━━━━━━━━━━━━━━
-
-Quel est son *numéro de téléphone* ?
+📞 *Numéro de téléphone ?*
 
 _Exemple: 06 12 34 56 78_
 _Tapez *retour* pour modifier_""")
@@ -1593,7 +1749,7 @@ _Tapez *retour* pour modifier_""")
     
     if state == State.DEVIS_TEL:
         if msg == "__show__":
-            send_whatsapp(phone_full, f"Client: {data.get('client_nom', '')}\n\n📝 *Étape 2/7* - Téléphone\n\nQuel est son *numéro* ?")
+            send_whatsapp(phone_full, f"👤 {data.get('client_nom', '')}\n\n📞 *Téléphone du client ?*\n\n_Exemple: 06 12 34 56 78_")
             return
         tel = re.sub(r'[^0-9+]', '', msg)
         if len(tel) < 10:
@@ -1601,51 +1757,67 @@ _Tapez *retour* pour modifier_""")
             return
         data["client_tel"] = tel
         conv["data"] = data
-        conv["state"] = State.DEVIS_EMAIL
+        conv["state"] = State.DEVIS_PRESTATIONS
         save_conv(phone, conv)
-        send_whatsapp(phone_full, f"""✅ Téléphone : *{tel}*
+        
+        # Suggestions de prestations favorites (Business)
+        favorites_msg = ""
+        entreprise = get_entreprise(phone)
+        if entreprise and is_business(entreprise):
+            favs = get_frequent_prestations(entreprise["id"])
+            if favs:
+                fav_lines = ["\n💡 *Vos prestations habituelles :*"]
+                for i, f in enumerate(favs[:3], 1):
+                    fav_lines.append(f"*F{i}.* {f['description']} | {f['prix_unitaire']:.0f}€/{f['unite']}")
+                fav_lines.append("_Tapez F1, F2... pour les ajouter_")
+                favorites_msg = "\n".join(fav_lines)
+                conv["data"]["_favorites"] = favs[:3]
+                save_conv(phone, conv)
+        
+        send_whatsapp(phone_full, f"""✅ Tél : *{tel}*
 
-━━━━━━━━━━━━━━━━━━
-*Étape 3/7* - Email (optionnel)
-━━━━━━━━━━━━━━━━━━
+🔨 *Décrivez les travaux avec les prix :*
 
-Quel est son *email* ?
+_Exemples :_
+• _Carrelage 30m² 50€_
+• _Peinture salon forfait 800€_
+• _Main d'œuvre 10h 45€_
 
-_Tapez *non* si pas d'email_
-_Tapez *retour* pour modifier_""")
+Envoyez tout en un message ou un vocal 🎤{favorites_msg}""")
         return
     
     if state == State.DEVIS_EMAIL:
         if msg == "__show__":
-            send_whatsapp(phone_full, "📝 *Étape 3/7* - Email\n\nQuel est son *email* ?\n_Tapez *non* si pas d'email_")
+            send_whatsapp(phone_full, "📧 *Email du client*\n\nQuel est son *email* ?\n_Tapez *non* si pas d'email_")
             return
         if msg_lower in ["non", "no", "pas", "aucun", "-", "passer"]:
             data["client_email"] = ""
         elif "@" in msg and "." in msg:
             data["client_email"] = msg.lower().strip()
         else:
-            send_whatsapp(phone_full, "⚠️ Email invalide.\n\nEntrez un email valide ou tapez *non*")
+            send_whatsapp(phone_full, "⚠️ Ça ne ressemble pas à un email.\n\nExemple : *client@email.com*\nOu tapez *non* pour passer")
             return
         
         conv["data"] = data
+        # Si on vient du récap, retourner au récap
+        if data.get("_from_recap"):
+            data["_from_recap"] = False
+            conv["data"] = data
+            conv["state"] = State.DEVIS_RECAP
+            save_conv(phone, conv)
+            email_txt = data["client_email"] or "Non renseigné"
+            send_whatsapp(phone_full, f"✅ Email : *{email_txt}*")
+            _show_recap(phone, phone_full, conv)
+            return
         conv["state"] = State.DEVIS_ADRESSE
         save_conv(phone, conv)
         email_txt = data["client_email"] or "Non renseigné"
-        send_whatsapp(phone_full, f"""✅ Email : *{email_txt}*
-
-━━━━━━━━━━━━━━━━━━
-*Étape 4/7* - Adresse (optionnel)
-━━━━━━━━━━━━━━━━━━
-
-Quelle est l'*adresse du chantier/client* ?
-
-_Tapez *non* si pas d'adresse_
-_Tapez *retour* pour modifier_""")
+        send_whatsapp(phone_full, f"✅ Email : *{email_txt}*\n\n📍 *Adresse du chantier/client* ?\n\n_Tapez *non* si pas d'adresse_")
         return
     
     if state == State.DEVIS_ADRESSE:
         if msg == "__show__":
-            send_whatsapp(phone_full, "📝 *Étape 4/7* - Adresse\n\nQuelle est l'*adresse* ?\n_Tapez *non* si pas d'adresse_")
+            send_whatsapp(phone_full, "📍 *Adresse du client*\n\nQuelle est l'*adresse* ?\n_Tapez *non* si pas d'adresse_")
             return
         if msg_lower in ["non", "no", "pas", "aucun", "-", "passer"]:
             data["client_adresse"] = ""
@@ -1653,27 +1825,37 @@ _Tapez *retour* pour modifier_""")
             data["client_adresse"] = msg
         
         conv["data"] = data
+        # Si on vient du récap, retourner au récap
+        if data.get("_from_recap"):
+            data["_from_recap"] = False
+            conv["data"] = data
+            conv["state"] = State.DEVIS_RECAP
+            save_conv(phone, conv)
+            addr_txt = data["client_adresse"] or "Non renseigné"
+            send_whatsapp(phone_full, f"✅ Adresse : *{addr_txt}*")
+            _show_recap(phone, phone_full, conv)
+            return
         conv["state"] = State.DEVIS_PROJET
         save_conv(phone, conv)
         addr_txt = data["client_adresse"] or "Non renseigné"
-        send_whatsapp(phone_full, f"""✅ Adresse : *{addr_txt}*
-
-━━━━━━━━━━━━━━━━━━
-*Étape 5/7* - Nom du projet
-━━━━━━━━━━━━━━━━━━
-
-Quel est le *nom du projet* ?
-
-_Exemple: Rénovation salle de bain_
-_Tapez *retour* pour modifier_""")
+        send_whatsapp(phone_full, f"✅ Adresse : *{addr_txt}*\n\n📁 Quel est le *nom du projet* ?\n\n_Exemple: Rénovation salle de bain_")
         return
     
     if state == State.DEVIS_PROJET:
         if msg == "__show__":
-            send_whatsapp(phone_full, "📝 *Étape 5/7* - Projet\n\nQuel est le *nom du projet* ?")
+            send_whatsapp(phone_full, "📁 *Nom du projet*\n\nQuel est le *nom du projet* ?")
             return
         data["titre_projet"] = msg
         conv["data"] = data
+        # Si on vient du récap, retourner au récap
+        if data.get("_from_recap"):
+            data["_from_recap"] = False
+            conv["data"] = data
+            conv["state"] = State.DEVIS_RECAP
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, f"✅ Projet : *{msg}*")
+            _show_recap(phone, phone_full, conv)
+            return
         conv["state"] = State.DEVIS_PRESTATIONS
         save_conv(phone, conv)
         
@@ -1693,24 +1875,19 @@ _Tapez *retour* pour modifier_""")
         
         send_whatsapp(phone_full, f"""✅ Projet : *{msg}*
 
-━━━━━━━━━━━━━━━━━━
-*Étape 6/7* - Prestations
-━━━━━━━━━━━━━━━━━━
-
-Décrivez les *travaux avec les prix* :
+🔨 *Décrivez les travaux avec les prix* :
 
 _Exemples :_
 • _Carrelage 30m² 50€_
 • _Peinture salon forfait 800€_
 • _Main d'œuvre 10h 45€_
 
-Envoyez tout en un message ou un vocal 🎤{favorites_msg}
-_Tapez *retour* pour modifier_""")
+Envoyez tout en un message ou un vocal 🎤{favorites_msg}""")
         return
     
     if state == State.DEVIS_PRESTATIONS:
         if msg == "__show__":
-            send_whatsapp(phone_full, "📝 *Étape 6/7* - Prestations\n\nDécrivez les *travaux avec les prix*\n_Envoyez tout en un message ou un vocal 🎤_")
+            send_whatsapp(phone_full, "🔨 *Décrivez les travaux avec les prix*\n\n_Exemples :_\n• _Carrelage 30m² 50€_\n• _Peinture forfait 800€_\n\n_Envoyez tout en un message ou un vocal 🎤_")
             return
         
         # Raccourci favoris F1, F2, F3
@@ -1766,12 +1943,23 @@ _Tapez *retour* pour modifier_""")
                 save_conv(phone, conv)
                 # Continue to normal parsing below
         
-        # Parser les prestations avec l'IA
-        send_whatsapp(phone_full, "⏳ Analyse en cours...")
-        prestations = parse_prestations_ia(msg)
+        # Parser les prestations : REGEX d'abord (instantané), IA en fallback
+        prestations = parse_prestations_regex(msg)
         
         if not prestations:
-            send_whatsapp(phone_full, "❌ Je n'ai pas compris les prestations.\n\nEssayez comme ça :\n_Carrelage 30m² 50€_\n_Peinture forfait 800€_")
+            # Fallback: IA (plus lent mais comprend le langage naturel)
+            send_whatsapp(phone_full, "⏳ Analyse en cours...")
+            prestations = parse_prestations_ia(msg)
+        
+        if not prestations:
+            send_whatsapp(phone_full, """❌ Je n'ai pas trouvé de *prix* dans votre message.
+
+Essayez ce format :
+• _Carrelage 30m² 50€_
+• _Peinture salon 800€_
+• _Main d'œuvre 10h 45€_
+
+💡 _Le prix en € est obligatoire !_""")
             return
         
         # APPEND aux prestations existantes (si "Ajouter une prestation")
@@ -1812,18 +2000,8 @@ _Tapez *retour* pour modifier_""")
     
     if state == State.DEVIS_PRESTATIONS_SUITE:
         if msg_lower in ["2", "continuer", "ok", "oui", "valider"]:
-            conv["state"] = State.DEVIS_OPTIONS
-            save_conv(phone, conv)
-            send_whatsapp(phone_full, """━━━━━━━━━━━━━━━━━━
-*Étape 7/7* - Options
-━━━━━━━━━━━━━━━━━━
-
-Souhaitez-vous ajouter :
-
-*1.* 🏷️ Remise
-*2.* 💰 Acompte
-*3.* ⏱️ Délai de réalisation
-*4.* ⏭️ Passer (pas d'option)""")
+            # Skip les options → aller directement au récap enrichi
+            _show_recap(phone, phone_full, conv)
             return
         
         if msg_lower in ["3", "refaire"]:
@@ -1878,14 +2056,16 @@ Souhaitez-vous ajouter :
             if 0 < remise <= 100:
                 data["remise_type"] = "pourcentage"
                 data["remise_valeur"] = remise
+                data["_from_recap"] = False
                 conv["data"] = data
-                conv["state"] = State.DEVIS_OPTIONS
+                conv["state"] = State.DEVIS_RECAP
                 save_conv(phone, conv)
-                send_whatsapp(phone_full, f"✅ Remise *{remise}%* ajoutée !\n\nAutre option ?\n*2.* 💰 Acompte\n*3.* ⏱️ Délai\n*4.* ⏭️ Passer")
+                send_whatsapp(phone_full, f"✅ Remise *{remise}%* ajoutée !")
+                _show_recap(phone, phone_full, conv)
                 return
         except:
             pass
-        send_whatsapp(phone_full, "❌ Nombre invalide. Entrez un pourcentage (ex: 10)")
+        send_whatsapp(phone_full, "⚠️ Entrez un pourcentage valide.\n\n_Exemple : *10* pour 10% de remise_")
         return
     
     if state == State.DEVIS_ACOMPTE:
@@ -1900,33 +2080,106 @@ Souhaitez-vous ajouter :
             try:
                 acompte = float(msg.replace("%", "").replace(",", ".").strip())
             except:
-                send_whatsapp(phone_full, "❌ Nombre invalide. Tapez *1* (30%), *2* (40%), *3* (50%) ou un nombre")
+                send_whatsapp(phone_full, "⚠️ Tapez *1* (30%), *2* (40%), *3* (50%) ou un pourcentage")
                 return
         
         if 0 < acompte <= 100:
             data["acompte_pourcentage"] = acompte
+            data["_from_recap"] = False
             conv["data"] = data
-            conv["state"] = State.DEVIS_OPTIONS
+            conv["state"] = State.DEVIS_RECAP
             save_conv(phone, conv)
-            send_whatsapp(phone_full, f"✅ Acompte *{acompte}%* ajouté !\n\nAutre option ?\n*1.* 🏷️ Remise\n*3.* ⏱️ Délai\n*4.* ⏭️ Passer")
+            send_whatsapp(phone_full, f"✅ Acompte *{acompte}%* ajouté !")
+            _show_recap(phone, phone_full, conv)
             return
-        send_whatsapp(phone_full, "❌ Nombre invalide (1-100)")
+        send_whatsapp(phone_full, "⚠️ Pourcentage invalide (entre 1 et 100)")
         return
     
     if state == State.DEVIS_DELAI:
         data["delai"] = msg
+        data["_from_recap"] = False
         conv["data"] = data
-        conv["state"] = State.DEVIS_OPTIONS
+        conv["state"] = State.DEVIS_RECAP
         save_conv(phone, conv)
-        send_whatsapp(phone_full, f"✅ Délai : *{msg}*\n\nAutre option ?\n*1.* 🏷️ Remise\n*2.* 💰 Acompte\n*4.* ⏭️ Passer")
+        send_whatsapp(phone_full, f"✅ Délai : *{msg}*")
+        _show_recap(phone, phone_full, conv)
         return
     
     if state == State.DEVIS_RECAP:
+        # Sub-state: attente d'input enrichissement
+        adding = data.get("_recap_adding")
+        if adding == "email":
+            if "@" in msg and "." in msg:
+                data["client_email"] = msg.lower().strip()
+            elif msg_lower in ["non", "annuler", "retour"]:
+                pass
+            else:
+                send_whatsapp(phone_full, "⚠️ Email invalide. Réessayez ou tapez *non*")
+                return
+            data.pop("_recap_adding", None)
+            conv["data"] = data
+            _show_recap(phone, phone_full, conv)
+            return
+        if adding == "adresse":
+            if msg_lower not in ["non", "annuler", "retour"]:
+                data["client_adresse"] = msg
+            data.pop("_recap_adding", None)
+            conv["data"] = data
+            _show_recap(phone, phone_full, conv)
+            return
+        if adding == "projet":
+            if msg_lower not in ["non", "annuler", "retour"]:
+                data["titre_projet"] = msg
+            data.pop("_recap_adding", None)
+            conv["data"] = data
+            _show_recap(phone, phone_full, conv)
+            return
+        if adding == "remise":
+            try:
+                val = float(msg.replace("%", "").replace(",", ".").strip())
+                if 0 < val <= 100:
+                    data["remise_type"] = "pourcentage"
+                    data["remise_valeur"] = val
+            except ValueError:
+                if msg_lower not in ["non", "annuler", "retour"]:
+                    send_whatsapp(phone_full, "⚠️ Entrez un pourcentage valide (ex: 10)")
+                    return
+            data.pop("_recap_adding", None)
+            conv["data"] = data
+            _show_recap(phone, phone_full, conv)
+            return
+        if adding == "acompte":
+            acompte_map = {"1": 30, "2": 40, "3": 50}
+            if msg_lower in acompte_map:
+                data["acompte_pourcentage"] = acompte_map[msg_lower]
+            else:
+                try:
+                    val = float(msg.replace("%", "").replace(",", ".").strip())
+                    if 0 < val <= 100:
+                        data["acompte_pourcentage"] = val
+                except ValueError:
+                    if msg_lower not in ["non", "annuler", "retour"]:
+                        send_whatsapp(phone_full, "⚠️ Tapez *1* (30%), *2* (40%), *3* (50%) ou un autre %")
+                        return
+            data.pop("_recap_adding", None)
+            conv["data"] = data
+            _show_recap(phone, phone_full, conv)
+            return
+        if adding == "delai":
+            if msg_lower not in ["non", "annuler", "retour"]:
+                data["delai"] = msg
+            data.pop("_recap_adding", None)
+            conv["data"] = data
+            _show_recap(phone, phone_full, conv)
+            return
+        
+        # Actions principales
         if msg_lower in ["1", "valider", "ok", "oui", "confirmer", "go"]:
             _generate_devis(phone, phone_full, conv)
             return
         if msg_lower in ["2", "modifier"]:
             conv["state"] = State.DEVIS_MODIFIER
+            conv["data"]["_from_recap"] = True
             save_conv(phone, conv)
             send_whatsapp(phone_full, """✏️ *Que voulez-vous modifier ?*
 
@@ -1939,11 +2192,50 @@ Souhaitez-vous ajouter :
 *7.* Remise/Acompte/Délai
 *8.* ❌ Annuler le devis""")
             return
-        if msg_lower in ["3", "annuler"]:
+        
+        # Enrichissement inline
+        if msg_lower == "3" and not data.get("client_email"):
+            data["_recap_adding"] = "email"
+            conv["data"] = data
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "📧 *Email du client ?*\n\n_Tapez *non* pour annuler_")
+            return
+        if msg_lower == "4" and not data.get("client_adresse"):
+            data["_recap_adding"] = "adresse"
+            conv["data"] = data
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "📍 *Adresse du chantier/client ?*\n\n_Tapez *non* pour annuler_")
+            return
+        if msg_lower == "5" and not data.get("titre_projet"):
+            data["_recap_adding"] = "projet"
+            conv["data"] = data
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "🏗️ *Nom du projet ?*\n\n_Exemple: Rénovation salle de bain_")
+            return
+        if msg_lower == "6" and not data.get("remise_type"):
+            data["_recap_adding"] = "remise"
+            conv["data"] = data
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "🏷️ *Pourcentage de remise ?*\n\n_Exemple: 10_")
+            return
+        if msg_lower == "7" and not data.get("acompte_pourcentage"):
+            data["_recap_adding"] = "acompte"
+            conv["data"] = data
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "💰 *Pourcentage d'acompte ?*\n\n*1.* 30%\n*2.* 40%\n*3.* 50%\n_Ou tapez un autre %_")
+            return
+        if msg_lower == "8" and not data.get("delai"):
+            data["_recap_adding"] = "delai"
+            conv["data"] = data
+            save_conv(phone, conv)
+            send_whatsapp(phone_full, "⏱️ *Délai de réalisation ?*\n\n_Exemple: 2 semaines_")
+            return
+        
+        if msg_lower in ["0", "annuler"]:
             reset_conv(phone)
             send_whatsapp(phone_full, "❌ Devis annulé.\n\n_Tapez *menu* pour recommencer._")
             return
-        send_whatsapp(phone_full, "Tapez *1* (valider), *2* (modifier) ou *3* (annuler)")
+        send_whatsapp(phone_full, "Tapez *1* (valider), *2* (modifier) ou *0* (annuler)")
         return
     
     if state == State.DEVIS_MODIFIER:
@@ -1970,23 +2262,18 @@ Souhaitez-vous ajouter :
     
     if state == State.DEVIS_GENERE:
         devis_info = data.get("devis_genere", {})
+        entreprise = get_entreprise(phone)
+        user_is_business = entreprise and is_business(entreprise)
         
+        # Option 1 : WhatsApp (tous plans)
         if msg_lower in ["1", "whatsapp", "envoyer"]:
-            # Envoyer par WhatsApp au client
             tel_client = devis_info.get("client_tel") or data.get("client_tel", "")
             if tel_client:
                 conv["state"] = State.DOCS_ENVOYER_WA
                 conv["data"]["send_doc"] = devis_info
                 conv["data"]["send_doc"]["default_tel"] = tel_client
                 save_conv(phone, conv)
-                send_whatsapp(phone_full, f"""📱 *Envoi WhatsApp*
-
-Client : {devis_info.get('client_nom', '')}
-Numéro : *{tel_client}*
-
-*1.* ✅ Envoyer à ce numéro
-*2.* 📝 Autre numéro
-*3.* ❌ Annuler""")
+                send_whatsapp(phone_full, f"📱 *Envoi WhatsApp*\n\nClient : {devis_info.get('client_nom', '')}\nNuméro : *{tel_client}*\n\n*1.* ✅ Envoyer à ce numéro\n*2.* 📝 Autre numéro\n*3.* ❌ Annuler")
                 return
             else:
                 send_whatsapp(phone_full, "📱 Entrez le numéro du client :\n\n_Exemple: 0612345678_")
@@ -1995,103 +2282,74 @@ Numéro : *{tel_client}*
                 save_conv(phone, conv)
                 return
         
-        if msg_lower in ["2", "email"]:
-            # Vérifier le plan pour l'envoi email
-            entreprise = get_entreprise(phone)
-            if entreprise and not is_business(entreprise):
-                send_whatsapp(phone_full, f"""🔒 L'envoi par *email* est réservé au plan Business.
-
-_En Business, vous envoyez le devis par email en 10 secondes — avec signature électronique incluse._
-
-👉 *{UPGRADE_LINK}*
-
-_Tapez *1* pour envoyer par WhatsApp_""")
-                return
-            email_client = devis_info.get("client_email") or data.get("client_email", "")
-            conv["state"] = State.DOCS_SIGNATURE_CHOIX
-            conv["data"]["send_doc"] = devis_info
-            conv["data"]["send_doc"]["default_email"] = email_client
-            conv["data"]["send_doc"]["doc_type"] = "devis"
-            save_conv(phone, conv)
-            
-            if email_client:
-                send_whatsapp(phone_full, f"""📧 *Envoi Email*
-
-Client : {devis_info.get('client_nom', '')}
-Email : *{email_client}*
-
-*1.* ✍️ Avec signature électronique
-*2.* 📄 Sans signature (PDF seul)
-*3.* 📝 Autre email
-*4.* ❌ Annuler""")
-            else:
-                send_whatsapp(phone_full, "📧 Entrez l'email du client :")
-                conv["state"] = State.DOCS_ENVOYER_EMAIL
+        # Business : 2=Email, 3=Acompte, 4=Nouveau, 5=Menu
+        if user_is_business:
+            if msg_lower in ["2", "email"]:
+                email_client = devis_info.get("client_email") or data.get("client_email", "")
+                conv["state"] = State.DOCS_SIGNATURE_CHOIX
+                conv["data"]["send_doc"] = devis_info
+                conv["data"]["send_doc"]["default_email"] = email_client
+                conv["data"]["send_doc"]["doc_type"] = "devis"
                 save_conv(phone, conv)
-            return
-        
-        if msg_lower in ["3", "nouveau", "nouveau devis"]:
-            reset_conv(phone)
-            conv = get_conv(phone)
-            conv["state"] = State.DEVIS_NOM
-            conv["data"] = {}
-            save_conv(phone, conv)
-            handle_message(phone, "__show__")
-            return
-        
-        if msg_lower in ["4", "facture", "acompte"]:
-            # Vérifier le plan pour les factures
-            entreprise = get_entreprise(phone)
-            if entreprise and not is_business(entreprise):
-                send_whatsapp(phone_full, f"""🔒 Les *factures* sont réservées au plan Business.
-
-_Facture d'acompte en 1 clic, facture finale automatique, suivi des paiements — tout depuis WhatsApp._
-
-💡 _Un seul devis signé rembourse 1 an d'abonnement !_
-
-👉 *{UPGRADE_LINK}*
-
-_Tapez *menu* pour revenir_""")
+                if email_client:
+                    send_whatsapp(phone_full, f"📧 *Envoi Email*\n\nClient : {devis_info.get('client_nom', '')}\nEmail : *{email_client}*\n\n*1.* ✍️ Avec signature électronique\n*2.* 📄 Sans signature (PDF seul)\n*3.* 📝 Autre email\n*4.* ❌ Annuler")
+                else:
+                    send_whatsapp(phone_full, "📧 Entrez l'email du client :")
+                    conv["state"] = State.DOCS_ENVOYER_EMAIL
+                    save_conv(phone, conv)
                 return
-            # Créer facture acompte directement
-            conv["state"] = State.FACTURE_ACOMPTE_TAUX
-            conv["data"]["selected_devis"] = devis_info
-            save_conv(phone, conv)
-            send_whatsapp(phone_full, "💰 *Facture d'acompte*\n\nQuel pourcentage ?\n\n*1.* 30%\n*2.* 40%\n*3.* 50%\n*4.* Autre")
-            return
+            
+            if msg_lower in ["3", "acompte", "facture"]:
+                conv["state"] = State.FACTURE_ACOMPTE_TAUX
+                conv["data"]["selected_devis"] = devis_info
+                save_conv(phone, conv)
+                send_whatsapp(phone_full, "💰 *Facture d'acompte*\n\nQuel pourcentage ?\n\n*1.* 30%\n*2.* 40%\n*3.* 50%\n*4.* Autre")
+                return
+            
+            if msg_lower in ["4", "nouveau", "nouveau devis"]:
+                reset_conv(phone)
+                conv = get_conv(phone)
+                conv["state"] = State.DEVIS_NOM
+                conv["data"] = {}
+                save_conv(phone, conv)
+                handle_message(phone, "__show__")
+                return
+            
+            if msg_lower in ["5", "menu"]:
+                reset_conv(phone)
+                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+                return
         
-        if msg_lower in ["5", "menu"]:
+        # Free : 2=Nouveau, 3=Menu
+        else:
+            if msg_lower in ["2", "nouveau", "nouveau devis"]:
+                reset_conv(phone)
+                conv = get_conv(phone)
+                conv["state"] = State.DEVIS_NOM
+                conv["data"] = {}
+                save_conv(phone, conv)
+                handle_message(phone, "__show__")
+                return
+            
+            if msg_lower in ["3", "menu"]:
+                reset_conv(phone)
+                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+                return
+            
+            if msg_lower in ["email"]:
+                send_whatsapp(phone_full, f"🔒 L'envoi par *email* est réservé au plan Business.\n\n👉 *{UPGRADE_LINK}*\n\n_Tapez *1* pour envoyer par WhatsApp_")
+                return
+            
+            if msg_lower in ["acompte", "facture"]:
+                send_whatsapp(phone_full, f"🔒 Les *factures* sont réservées au plan Business.\n\n👉 *{UPGRADE_LINK}*\n\n_Tapez *1* pour envoyer par WhatsApp_")
+                return
+        
+        if msg_lower in ["menu"]:
             reset_conv(phone)
             send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
             return
         
-        if msg_lower in ["6", "combo"]:
-            # Combo : WA + Email + Facture acompte
-            entreprise = get_entreprise(phone)
-            if entreprise and not is_business(entreprise):
-                send_whatsapp(phone_full, f"🔒 Le *Combo* est réservé au plan Business.\n\n👉 *{UPGRADE_LINK}*")
-                return
-            
-            client = devis_info.get("client_nom", "")
-            total = devis_info.get("total_ttc", 0)
-            conv["state"] = State.COMBO_CONFIRM
-            conv["data"]["combo_devis"] = devis_info
-            save_conv(phone, conv)
-            send_whatsapp(phone_full, f"""🚀 *COMBO — Tout en 1 clic*
-
-📱 Envoyer devis par WhatsApp
-📧 Envoyer devis par email
-💰 Créer facture d'acompte 30%
-
-Client : *{client}*
-Devis : *{total:.2f}€ TTC*
-
-*1.* ✅ Tout lancer
-*2.* 📊 Modifier le taux d'acompte
-*3.* ❌ Annuler""")
-            return
-        
-        send_whatsapp(phone_full, "Tapez *1* à *6* ou *menu*")
+        send_whatsapp(phone_full, "Tapez un numéro pour choisir une option")
         return
     
     # =========================================================================
@@ -2656,7 +2914,7 @@ _Tapez *menu* pour annuler_""")
             conv["data"] = {"prestations": prestations_internes, "_from_duplicate": True}
             conv["state"] = State.DEVIS_NOM
             save_conv(phone, conv)
-            send_whatsapp(phone_full, "📝 *Étape 1/7* - Nom du nouveau client\n\nQuel est le *nom du client* ?")
+            send_whatsapp(phone_full, "👤 *Nom du nouveau client* ?\n\n_ou envoyez tout d'un coup :_\n_Dupont 0612345678 carrelage 30m² 50€_")
             return
         
         send_whatsapp(phone_full, "Tapez *1* (même client) ou *2* (nouveau client)")
@@ -2941,7 +3199,7 @@ def _show_documents(phone: str, phone_full: str, conv: Dict):
 
 
 def _show_recap(phone: str, phone_full: str, conv: Dict):
-    """Affiche le récap du devis avant validation"""
+    """Affiche le récap enrichi du devis — options intégrées"""
     data = conv.get("data", {})
     prestations = data.get("prestations", [])
     
@@ -3012,9 +3270,28 @@ def _show_recap(phone: str, phone_full: str, conv: Dict):
         lines.append(f"⏱️ Délai : {data['delai']}")
     
     lines.append("\n━━━━━━━━━━━━━━━━━━")
-    lines.append("*1.* ✅ Valider et générer")
+    lines.append("*1.* ✅ *Valider et générer*")
     lines.append("*2.* ✏️ Modifier")
-    lines.append("*3.* ❌ Annuler")
+    
+    # Options d'enrichissement (compactes)
+    enrichment = []
+    if not data.get("client_email"):
+        enrichment.append("*3.* + 📧 Email")
+    if not data.get("client_adresse"):
+        enrichment.append("*4.* + 📍 Adresse")
+    if not data.get("titre_projet"):
+        enrichment.append("*5.* + 🏗️ Projet")
+    if not data.get("remise_type"):
+        enrichment.append("*6.* + 🏷️ Remise")
+    if not data.get("acompte_pourcentage"):
+        enrichment.append("*7.* + 💰 Acompte")
+    if not data.get("delai"):
+        enrichment.append("*8.* + ⏱️ Délai")
+    
+    if enrichment:
+        lines.append("  ".join(enrichment))
+    
+    lines.append("*0.* ❌ Annuler")
     
     conv["state"] = State.DEVIS_RECAP
     save_conv(phone, conv)
@@ -3166,21 +3443,16 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
         if pdf_url and pdf_url.startswith("http"):
             send_whatsapp_document(phone_full, pdf_url, f"📄 Devis {numero_devis}")
         
-        # Message de succès avec actions (adapté au plan)
+        # Message de succès - default WhatsApp send
         user_is_business = is_business(entreprise)
+        tel_client = data.get("client_tel", "")
         
         if user_is_business:
-            success_msg = f"""✅ *Devis {numero_devis} créé !*
-
-💰 Total : *{total_ttc_calc:.2f}€ TTC*
-
-━━━━━━━━━━━━━━━━━━
-*1.* 📱 Envoyer par WhatsApp
-*2.* 📧 Envoyer par email
-*3.* 📝 Nouveau devis
-*4.* 💰 Créer facture d'acompte
-*5.* 🏠 Menu
-*6.* 🚀 Combo (WA + Email + Acompte)"""
+            actions = "*1.* 📱 Envoyer par WhatsApp"
+            if tel_client:
+                actions += f" → {tel_client}"
+            actions += "\n*2.* 📧 Envoyer par email\n*3.* 💰 Facture d'acompte\n*4.* 📝 Nouveau devis\n*5.* 🏠 Menu"
+            success_msg = f"✅ *Devis {numero_devis} créé !*\n\n💰 Total : *{total_ttc_calc:.2f}€ TTC*\n\n{actions}"
         else:
             _, _, remaining = check_can_create_devis(entreprise)
             nudge = ""
@@ -3191,16 +3463,11 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
             else:
                 nudge = f"\n\n📊 _{remaining} devis restant(s) ce mois-ci_"
             
-            success_msg = f"""✅ *Devis {numero_devis} créé !*
-
-💰 Total : *{total_ttc_calc:.2f}€ TTC*
-
-━━━━━━━━━━━━━━━━━━
-*1.* 📱 Envoyer par WhatsApp
-*2.* 🔒 Envoyer par email _(Business)_
-*3.* 📝 Nouveau devis
-*4.* 🔒 Facture d'acompte _(Business)_
-*5.* 🏠 Menu{nudge}"""
+            actions = "*1.* 📱 Envoyer par WhatsApp"
+            if tel_client:
+                actions += f" → {tel_client}"
+            actions += "\n*2.* 📝 Nouveau devis\n*3.* 🏠 Menu"
+            success_msg = f"✅ *Devis {numero_devis} créé !*\n\n💰 Total : *{total_ttc_calc:.2f}€ TTC*\n\n{actions}{nudge}"
         
         send_whatsapp(phone_full, success_msg)
         
