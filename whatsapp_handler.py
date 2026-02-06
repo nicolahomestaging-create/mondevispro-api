@@ -279,7 +279,7 @@ def send_whatsapp_template(to: str, template_sid: str):
     """Envoie un template WhatsApp (menu avec boutons)"""
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
         # Fallback: envoyer le menu en texte
-        send_whatsapp(to, "👋 *Bienvenue sur Vocario !*\n\nTapez:\n*1* → 📝 Nouveau devis\n*2* → 🧾 Nouvelle facture\n*3* → 📂 Mes documents")
+        send_whatsapp(to, "👋 *Bienvenue sur Vocario !*\n\nTapez:\n*1* → 📝 Nouveau devis\n*2* → 📂 Mes documents\n*3* → ❓ Aide")
         return True
     try:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
@@ -299,7 +299,7 @@ def send_whatsapp_template(to: str, template_sid: str):
         else:
             logger.error(f"Erreur template Twilio {resp.status_code}: {resp.text[:200]}")
             # Fallback texte
-            send_whatsapp(to, "👋 *Bienvenue sur Vocario !*\n\nTapez:\n*1* → 📝 Nouveau devis\n*2* → 🧾 Nouvelle facture\n*3* → 📂 Mes documents")
+            send_whatsapp(to, "👋 *Bienvenue sur Vocario !*\n\nTapez:\n*1* → 📝 Nouveau devis\n*2* → 📂 Mes documents\n*3* → ❓ Aide")
             return True
     except Exception as e:
         logger.error(f"Erreur template: {e}")
@@ -1432,11 +1432,11 @@ _Tapez *menu* pour revenir_""")
         
         if button_payload in ["nouveau_devis", "new_devis", "Nouveau devis"]:
             is_global_shortcut = True
-        elif button_payload in ["nouvelle_facture", "new_facture", "Nouvelle facture"]:
-            is_global_shortcut = True
         elif button_payload in ["mes_documents", "documents", "Mes documents"]:
             is_global_shortcut = True
-        elif msg_lower in ["nouveau devis", "créer devis", "nouvelle facture", "créer facture", "mes documents", "documents", "mes docs", "docs", "facture"]:
+        elif button_payload in ["aide", "help", "Aide"]:
+            is_global_shortcut = True
+        elif msg_lower in ["nouveau devis", "créer devis", "mes documents", "documents", "mes docs", "docs", "aide", "help"]:
             is_global_shortcut = True
         
         if is_global_shortcut:
@@ -1522,55 +1522,37 @@ _ou envoyez tout d'un coup :_
 _Dupont 0612345678 carrelage 30m² 50€_""")
             return
         
-        if button_payload in ["nouvelle_facture", "new_facture", "Nouvelle facture"] or msg_lower in ["2", "facture", "nouvelle facture"]:
-            entreprise = get_entreprise(phone)
-            if not entreprise:
-                send_whatsapp(phone_full, "❌ Entreprise non trouvée. Configurez votre profil sur vocario.fr\n\n_Tapez *menu* pour revenir_")
-                return
-            
-            # Vérifier le plan
-            if not is_business(entreprise):
-                send_whatsapp(phone_full, UPGRADE_MSG_FACTURES)
-                return
-            
-            devis_list = get_devis_for_facture(entreprise["id"])
-            if not devis_list:
-                send_whatsapp(phone_full, "📭 Aucun devis trouvé. Créez d'abord un devis !\n\n_Tapez *menu* pour revenir_")
-                return
-            
-            # Afficher la liste des devis pour facturation
-            lines = ["🧾 *NOUVELLE FACTURE*\n", "Choisissez le devis à facturer :\n"]
-            for i, d in enumerate(devis_list, 1):
-                client = d.get("client_nom", "")
-                total = d.get("total_ttc", 0)
-                factures = d.get("factures", [])
-                
-                # Résumé des factures existantes
-                acomptes_payes = sum(f.get("total_ttc", 0) for f in factures if f.get("statut") == "payee" and f.get("type_facture") == "acompte")
-                has_finale = any(f.get("type_facture") != "acompte" for f in factures)
-                
-                info = f"*{i}.* {client} | {total:.0f}€"
-                if has_finale:
-                    info += " | ✅ Déjà facturé"
-                elif acomptes_payes > 0:
-                    info += f" | 💰 Acompte {acomptes_payes:.0f}€ payé"
-                elif factures:
-                    info += " | ⏳ Acompte en attente"
-                else:
-                    info += " | Pas encore facturé"
-                lines.append(info)
-            
-            lines.append(f"\n_Tapez le numéro (1-{len(devis_list)})_")
-            lines.append("_Tapez *menu* pour revenir_")
-            
-            conv["state"] = State.FACTURE_LISTE
-            conv["data"] = {"devis_options": devis_list}
-            save_conv(phone, conv)
-            send_whatsapp(phone_full, "\n".join(lines))
+        if button_payload in ["mes_documents", "documents", "Mes documents"] or msg_lower in ["2", "documents", "mes documents", "docs", "mes docs"]:
+            _show_documents(phone, phone_full, conv)
             return
         
-        if button_payload in ["mes_documents", "documents", "Mes documents"] or msg_lower in ["3", "documents", "mes documents", "docs", "mes docs"]:
+        # "facture" en texte libre → rediriger vers documents avec indice
+        if msg_lower in ["facture", "nouvelle facture", "créer facture"]:
+            send_whatsapp(phone_full, "🧾 Pour créer une facture, ouvrez un devis depuis *Mes documents* et choisissez *Facturer*.\n\n_Ouverture de vos documents..._")
             _show_documents(phone, phone_full, conv)
+            return
+        
+        if button_payload in ["aide", "help", "Aide"] or msg_lower in ["3", "aide", "help"]:
+            aide_msg = """❓ *AIDE VOCARIO*
+
+📝 *Créer un devis* → Tapez *1* ou le bouton "Nouveau devis"
+_Vous pouvez envoyer tout d'un coup :_
+_Dupont 0612345678 carrelage 30m² 50€_
+
+📂 *Mes documents* → Tapez *2*
+_Retrouvez vos devis et factures_
+_Créez une facture depuis un devis existant_
+
+🔄 *Navigation*
+_Tapez *retour* pour revenir en arrière_
+_Tapez *menu* pour revenir ici_
+
+🎤 *Vocal*
+_Envoyez un message vocal, Vocario comprend !_
+
+💬 *Besoin d'aide ?*
+_Écrivez-nous : contact@vocario.fr_"""
+            send_whatsapp(phone_full, aide_msg)
             return
         
         # Option 4 : Dupliquer un devis (Business)
@@ -2408,9 +2390,7 @@ Essayez ce format :
             return
         
         if msg_lower in ["3", "retour"]:
-            conv["state"] = State.FACTURE_LISTE
-            save_conv(phone, conv)
-            handle_message(phone, "2")  # Re-afficher la liste facture
+            _show_documents(phone, phone_full, conv)
             return
         
         send_whatsapp(phone_full, "Tapez *1* (acompte), *2* (finale) ou *3* (retour)")
