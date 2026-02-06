@@ -736,9 +736,9 @@ def format_documents_list(devis_list: List[Dict], factures_orphelines: List[Dict
                 "annule": "🚫",
             }.get(statut_raw, "⏳")
             
-            # Ligne devis : numéro + projet + montant + statut
+            # Ligne devis : numéro + type + projet + montant + statut
             label = projet if projet else d.get("numero_devis", "Devis")
-            lines.append(f"*{idx}.* {label} · {total:.0f}€ {statut_emoji}")
+            lines.append(f"*{idx}.* 📋 Devis · {label} · {total:.0f}€ {statut_emoji}")
             
             doc_index[str(idx)] = {"type": "devis", "data": d}
             idx += 1
@@ -789,9 +789,10 @@ def format_documents_list(devis_list: List[Dict], factures_orphelines: List[Dict
     return "\n".join(lines), doc_index
 
 
-def format_doc_detail(doc_type: str, doc: Dict, devis_parent: Dict = None) -> str:
-    """Formate le détail d'un document avec actions"""
+def format_doc_detail(doc_type: str, doc: Dict, devis_parent: Dict = None) -> tuple:
+    """Formate le détail d'un document avec actions. Retourne (texte, facture_index)"""
     lines = []
+    facture_index = {}  # numéro -> facture data (pour navigation)
     
     if doc_type == "devis":
         numero = doc.get("numero_devis", "")
@@ -813,16 +814,22 @@ def format_doc_detail(doc_type: str, doc: Dict, devis_parent: Dict = None) -> st
         lines.append(f"💰 {total:.2f}€ TTC")
         lines.append(f"📊 {statut}")
         
-        # Factures liées
+        # Factures liées - numérotées et cliquables
         factures = doc.get("factures", [])
         if factures:
-            lines.append("\n📎 *Factures liées :*")
+            lines.append("")
+            lines.append("📎 *Factures liées :*")
+            fac_num = 7  # Les factures commencent à 7
             for f in factures:
-                ft = "Acompte" if f.get("type_facture") == "acompte" else "Finale"
+                ft_emoji = "💰" if f.get("type_facture") == "acompte" else "🧾"
+                ft_label = "Acompte" if f.get("type_facture") == "acompte" else "Facture"
                 fs = format_statut(f.get("statut", ""))
-                lines.append(f"  └ {f.get('numero_facture', '')} | {ft} {f.get('total_ttc', 0):.0f}€ | {fs}")
+                lines.append(f"  *{fac_num}.* {ft_emoji} {ft_label} {f.get('total_ttc', 0):.0f}€ · {fs}")
+                facture_index[str(fac_num)] = f
+                fac_num += 1
         
-        lines.append("\n━━━━━━━━━━━━━━━━━━")
+        lines.append("")
+        lines.append("━━━━━━━━━━━━━━━━━━")
         lines.append("*1.* 📱 Envoyer par WhatsApp")
         lines.append("*2.* 📧 Envoyer par email")
         lines.append("*3.* 💰 Créer facture d'acompte")
@@ -852,7 +859,7 @@ def format_doc_detail(doc_type: str, doc: Dict, devis_parent: Dict = None) -> st
         lines.append("*4.* 🗑️ Supprimer")
         lines.append("*5.* ↩️ Retour")
     
-    return "\n".join(lines)
+    return "\n".join(lines), facture_index
 
 
 # =============================================================================
@@ -1537,10 +1544,13 @@ Email : *{email_client}*
             data["current_doc"] = doc_entry
             conv["data"] = data
             conv["state"] = State.DOCS_DETAIL
+            
+            detail_text, facture_index = format_doc_detail(doc_entry["type"], doc_entry["data"], doc_entry.get("devis"))
+            data["facture_index"] = facture_index  # Pour navigation vers factures
+            conv["data"] = data
             save_conv(phone, conv)
             
-            detail = format_doc_detail(doc_entry["type"], doc_entry["data"], doc_entry.get("devis"))
-            send_whatsapp(phone_full, detail)
+            send_whatsapp(phone_full, detail_text)
             return
         
         send_whatsapp(phone_full, "❌ Numéro invalide. Tapez un numéro de la liste ou *menu*.")
@@ -1601,6 +1611,19 @@ Email : *{email_client}*
             if msg_lower in ["6", "retour"]:
                 _show_documents(phone, phone_full, conv)
                 return
+            
+            # Numéros 7+ → navigation vers facture liée
+            facture_idx = data.get("facture_index", {})
+            if msg_lower in facture_idx:
+                fac_data = facture_idx[msg_lower]
+                # Naviguer vers la vue détail de cette facture
+                data["current_doc"] = {"type": "facture", "data": fac_data, "devis": doc}
+                data["facture_index"] = {}
+                conv["data"] = data
+                save_conv(phone, conv)
+                detail_text, _ = format_doc_detail("facture", fac_data, doc)
+                send_whatsapp(phone_full, detail_text)
+                return
         
         # FACTURE actions
         elif doc_type == "facture":
@@ -1643,7 +1666,18 @@ Email : *{email_client}*
                 return
             
             if msg_lower in ["5", "retour"]:
-                _show_documents(phone, phone_full, conv)
+                # Si on vient d'un devis parent, retourner au détail du devis
+                if devis_parent:
+                    data["current_doc"] = {"type": "devis", "data": devis_parent}
+                    conv["data"] = data
+                    save_conv(phone, conv)
+                    detail_text, facture_idx = format_doc_detail("devis", devis_parent)
+                    data["facture_index"] = facture_idx
+                    conv["data"] = data
+                    save_conv(phone, conv)
+                    send_whatsapp(phone_full, detail_text)
+                else:
+                    _show_documents(phone, phone_full, conv)
                 return
         
         send_whatsapp(phone_full, "Tapez un numéro d'action ou *menu*")
