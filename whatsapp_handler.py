@@ -697,50 +697,93 @@ def format_statut(statut: str, doc_type: str = "devis") -> str:
 
 
 def format_documents_list(devis_list: List[Dict], factures_orphelines: List[Dict]) -> str:
-    """Formate la liste de documents groupés (devis + factures associées)"""
+    """Formate la liste de documents groupés par client, lisible sur WhatsApp"""
     if not devis_list and not factures_orphelines:
-        return "📂 *Aucun document pour le moment*\n\nTapez *menu* pour créer un devis."
+        return "📂 *Aucun document pour le moment*\n\nTapez *menu* pour créer un devis.", {}
     
-    lines = ["📂 *MES DOCUMENTS*\n"]
+    lines = ["📂 *MES DOCUMENTS*"]
     idx = 1
-    doc_index = {}  # Pour mapper numéro -> doc
+    doc_index = {}
     
+    # ── Grouper les devis par client ──
+    clients = {}
     for d in devis_list:
-        statut = format_statut(d.get("statut", "en_attente"), "devis")
-        total = d.get("total_ttc", 0)
-        client = d.get("client_nom", "")
-        numero = d.get("numero_devis", "")
-        projet = d.get("titre_projet", "")
+        client = (d.get("client_nom") or "Sans nom").strip().upper()
+        if client not in clients:
+            clients[client] = []
+        clients[client].append(d)
+    
+    for client_name, devis in clients.items():
+        lines.append("")
+        lines.append(f"━━━━━━━━━━━━━━━━━━")
+        lines.append(f"👤 *{client_name}*")
+        lines.append("")
         
-        label = f"📋 {client}"
-        if projet:
-            label += f" | {projet}"
-        label += f" | {total:.0f}€ | {statut}"
+        for d in devis:
+            total = d.get("total_ttc", 0)
+            statut_raw = d.get("statut", "en_attente")
+            projet = d.get("titre_projet", "")
+            
+            # Emoji statut compact (sans texte)
+            statut_emoji = {
+                "en_attente": "⏳",
+                "envoye": "📤",
+                "signe": "✍️",
+                "accepte": "✅",
+                "refuse": "❌",
+                "payee": "💰",
+                "paye": "💰",
+                "annule": "🚫",
+            }.get(statut_raw, "⏳")
+            
+            # Ligne devis : numéro + projet + montant + statut
+            label = projet if projet else d.get("numero_devis", "Devis")
+            lines.append(f"*{idx}.* {label} · {total:.0f}€ {statut_emoji}")
+            
+            doc_index[str(idx)] = {"type": "devis", "data": d}
+            idx += 1
+            
+            # Résumé factures compact (1 ligne max)
+            factures = d.get("factures", [])
+            if factures:
+                nb_total = len(factures)
+                nb_payees = sum(1 for f in factures if f.get("statut") in ("payee", "paye"))
+                nb_acomptes = sum(1 for f in factures if f.get("type_facture") == "acompte")
+                nb_finales = nb_total - nb_acomptes
+                
+                parts = []
+                if nb_acomptes > 0:
+                    parts.append(f"{nb_acomptes} acompte{'s' if nb_acomptes > 1 else ''}")
+                if nb_finales > 0:
+                    parts.append(f"{nb_finales} facture{'s' if nb_finales > 1 else ''}")
+                
+                summary = " + ".join(parts)
+                if nb_payees > 0:
+                    summary += f" ({nb_payees} payée{'s' if nb_payees > 1 else ''})"
+                
+                lines.append(f"     └ {summary}")
+    
+    # ── Factures orphelines ──
+    if factures_orphelines:
+        lines.append("")
+        lines.append(f"━━━━━━━━━━━━━━━━━━")
+        lines.append(f"🧾 *FACTURES*")
+        lines.append("")
         
-        lines.append(f"*{idx}.* {label}")
-        doc_index[str(idx)] = {"type": "devis", "data": d}
-        idx += 1
-        
-        # Factures associées (sous le devis)
-        for f in d.get("factures", []):
-            fac_type = "🧾 Acompte" if f.get("type_facture") == "acompte" else "🧾 Facture"
-            fac_statut = format_statut(f.get("statut", "en_attente"), "facture")
+        for f in factures_orphelines:
+            fac_type = "Acompte" if f.get("type_facture") == "acompte" else "Facture"
+            statut_raw = f.get("statut", "en_attente")
+            statut_emoji = {"en_attente": "⏳", "envoye": "📤", "payee": "💰", "paye": "💰"}.get(statut_raw, "⏳")
             fac_total = f.get("total_ttc", 0)
-            lines.append(f"   └ {idx}. {fac_type} {fac_total:.0f}€ | {fac_statut}")
-            doc_index[str(idx)] = {"type": "facture", "data": f, "devis": d}
+            client = f.get("client_nom", "")
+            
+            lines.append(f"*{idx}.* {fac_type} {client} · {fac_total:.0f}€ {statut_emoji}")
+            doc_index[str(idx)] = {"type": "facture", "data": f}
             idx += 1
     
-    # Factures orphelines (sans devis)
-    for f in factures_orphelines:
-        fac_type = "🧾 Acompte" if f.get("type_facture") == "acompte" else "🧾 Facture"
-        fac_statut = format_statut(f.get("statut", "en_attente"), "facture")
-        fac_total = f.get("total_ttc", 0)
-        client = f.get("client_nom", "")
-        lines.append(f"*{idx}.* {fac_type} {client} | {fac_total:.0f}€ | {fac_statut}")
-        doc_index[str(idx)] = {"type": "facture", "data": f}
-        idx += 1
-    
-    lines.append(f"\n_Tapez le numéro (1-{idx-1}) pour voir les détails_")
+    lines.append("")
+    lines.append(f"━━━━━━━━━━━━━━━━━━")
+    lines.append(f"_Tapez un N° (1-{idx-1}) pour gérer_")
     lines.append("_Tapez *menu* pour revenir_")
     
     return "\n".join(lines), doc_index
