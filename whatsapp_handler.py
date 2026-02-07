@@ -1515,11 +1515,10 @@ _Tapez *menu* pour revenir_""")
             save_conv(phone, conv)
             send_whatsapp(phone_full, """📝 *NOUVEAU DEVIS*
 
-👤 Quel est le *nom du client* ?
+👤 Entrez le *nom du client*
 
-_Exemple: M. Dupont_
-_ou envoyez tout d'un coup :_
-_Dupont 0612345678 carrelage 30m² 50€_""")
+⚡ *Devis express :* envoyez tout en 1 message !
+→ _Dupont 0612345678 carrelage 30m² 50€_""")
             return
         
         if button_payload in ["mes_documents", "documents", "Mes documents"] or msg_lower in ["2", "documents", "mes documents", "docs", "mes docs"]:
@@ -1535,23 +1534,26 @@ _Dupont 0612345678 carrelage 30m² 50€_""")
         if button_payload in ["aide", "help", "Aide"] or msg_lower in ["3", "aide", "help"]:
             aide_msg = """❓ *AIDE VOCARIO*
 
-📝 *Créer un devis* → Tapez *1* ou le bouton "Nouveau devis"
-_Vous pouvez envoyer tout d'un coup :_
-_Dupont 0612345678 carrelage 30m² 50€_
+📝 *Créer un devis*
+Tapez *1* ou appuyez sur "Nouveau devis"
 
-📂 *Mes documents* → Tapez *2*
-_Retrouvez vos devis et factures_
-_Créez une facture depuis un devis existant_
+⚡ *Devis express* — Gagnez du temps !
+Envoyez tout en 1 seul message :
+→ _Dupont 0612345678 carrelage 30m² 50€_
+Vocario crée le devis automatiquement.
+
+📂 *Mes documents*
+Tapez *2* pour retrouver vos devis et factures.
+Depuis un devis, vous pouvez facturer, envoyer, relancer.
+
+🎤 *Messages vocaux*
+Envoyez un vocal, Vocario comprend !
 
 🔄 *Navigation*
-_Tapez *retour* pour revenir en arrière_
-_Tapez *menu* pour revenir ici_
+_*retour* → revenir en arrière_
+_*menu* → revenir à l'accueil_
 
-🎤 *Vocal*
-_Envoyez un message vocal, Vocario comprend !_
-
-💬 *Besoin d'aide ?*
-_Écrivez-nous : contact@vocario.fr_"""
+💬 *Support : contact@vocario.fr*"""
             send_whatsapp(phone_full, aide_msg)
             return
         
@@ -1627,7 +1629,7 @@ _Écrivez-nous : contact@vocario.fr_"""
             conv["state"] = State.DEVIS_NOM
             conv["data"] = {}
             save_conv(phone, conv)
-            send_whatsapp(phone_full, "👤 *Nom du client ?*\n\n_Ou envoyez tout en un message :_\n_Dupont 0612345678 carrelage 30m² 50€_")
+            send_whatsapp(phone_full, "👤 Entrez le *nom du client*\n\n⚡ *Devis express :* envoyez tout en 1 message !\n→ _Dupont 0612345678 carrelage 30m² 50€_")
             return
         # Sélection par numéro
         try:
@@ -1685,7 +1687,7 @@ _Exemple: 06 12 34 56 78_""")
     
     if state == State.DEVIS_NOM:
         if msg == "__show__":
-            send_whatsapp(phone_full, "👤 *Nom du client ?*\n\n_Ou envoyez tout en un message :_\n_Dupont 0612345678 carrelage 30m² 50€_")
+            send_whatsapp(phone_full, "👤 Entrez le *nom du client*\n\n⚡ *Devis express :* envoyez tout en 1 message !\n→ _Dupont 0612345678 carrelage 30m² 50€_")
             return
         
         # Mode express : détecter nom + tél + prestations en un message
@@ -1694,6 +1696,7 @@ _Exemple: 06 12 34 56 78_""")
             data["client_nom"] = express["client_nom"]
             data["client_tel"] = express["client_tel"]
             data["prestations"] = express["prestations"]
+            data["_from_express"] = True
             conv["data"] = data
             
             total_ht = sum(p["quantite"] * p["prix_unitaire"] for p in express["prestations"])
@@ -1705,7 +1708,7 @@ _Exemple: 06 12 34 56 78_""")
                 else:
                     presta_lines.append(f"• {p['description']} {p['quantite']} {p['unite']} × {p['prix_unitaire']:.0f}€ = {t:.0f}€")
             
-            send_whatsapp(phone_full, f"""⚡ *Mode express !*
+            send_whatsapp(phone_full, f"""⚡ *Devis express détecté !*
 
 👤 {express['client_nom']}
 📞 {express['client_tel']}
@@ -2894,7 +2897,7 @@ _Tapez *menu* pour annuler_""")
             conv["data"] = {"prestations": prestations_internes, "_from_duplicate": True}
             conv["state"] = State.DEVIS_NOM
             save_conv(phone, conv)
-            send_whatsapp(phone_full, "👤 *Nom du nouveau client* ?\n\n_ou envoyez tout d'un coup :_\n_Dupont 0612345678 carrelage 30m² 50€_")
+            send_whatsapp(phone_full, "👤 *Nom du nouveau client* ?\n\n⚡ *Devis express :* envoyez tout en 1 message !\n→ _Dupont 0612345678 carrelage 30m² 50€_")
             return
         
         send_whatsapp(phone_full, "Tapez *1* (même client) ou *2* (nouveau client)")
@@ -3427,12 +3430,17 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
         user_is_business = is_business(entreprise)
         tel_client = data.get("client_tel", "")
         
+        # Astuce express pour les utilisateurs étape par étape
+        express_tip = ""
+        if not data.get("_from_express") and not data.get("_from_duplicate"):
+            express_tip = "\n\n💡 _Astuce : envoyez tout en 1 message !_\n→ _Dupont 0612345678 carrelage 30m² 50€_"
+        
         if user_is_business:
             actions = "*1.* 📱 Envoyer par WhatsApp"
             if tel_client:
                 actions += f" → {tel_client}"
             actions += "\n*2.* 📧 Envoyer par email\n*3.* 💰 Facture d'acompte\n*4.* 📝 Nouveau devis\n*5.* 🏠 Menu"
-            success_msg = f"✅ *Devis {numero_devis} créé !*\n\n💰 Total : *{total_ttc_calc:.2f}€ TTC*\n\n{actions}"
+            success_msg = f"✅ *Devis {numero_devis} créé !*\n\n💰 Total : *{total_ttc_calc:.2f}€ TTC*\n\n{actions}{express_tip}"
         else:
             _, _, remaining = check_can_create_devis(entreprise)
             nudge = ""
@@ -3447,11 +3455,9 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
             if tel_client:
                 actions += f" → {tel_client}"
             actions += "\n*2.* 📝 Nouveau devis\n*3.* 🏠 Menu"
-            success_msg = f"✅ *Devis {numero_devis} créé !*\n\n💰 Total : *{total_ttc_calc:.2f}€ TTC*\n\n{actions}{nudge}"
+            success_msg = f"✅ *Devis {numero_devis} créé !*\n\n💰 Total : *{total_ttc_calc:.2f}€ TTC*\n\n{actions}{nudge}{express_tip}"
         
         send_whatsapp(phone_full, success_msg)
-        
-        # Sauvegarder l'état
         conv["state"] = State.DEVIS_GENERE
         conv["data"]["devis_genere"] = {
             "id": devis_db_id,
