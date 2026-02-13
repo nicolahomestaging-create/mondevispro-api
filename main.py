@@ -3087,63 +3087,12 @@ async def download_file(filename: str):
 def health_check():
     return {"status": "healthy"}
 
-@app.get("/debug-env")
-def debug_env():
-    """Endpoint de debug pour voir les variables d'environnement (à supprimer après)"""
-    all_env = dict(os.environ)
-    # Masquer les valeurs sensibles
-    safe_env = {}
-    for key, value in all_env.items():
-        if any(sensitive in key.upper() for sensitive in ['KEY', 'PASSWORD', 'SECRET', 'TOKEN']):
-            safe_env[key] = f"{value[:10]}... (masqué)" if value else "VIDE"
-        else:
-            safe_env[key] = value[:50] + "..." if len(value) > 50 else value
-    
-    return {
-        "all_env_keys": sorted(list(all_env.keys())),
-        "supabase_vars": {
-            "SUPABASE_URL": "OUI" if os.getenv("SUPABASE_URL") else "NON",
-            "SUPABASE_SERVICE_KEY": "OUI" if os.getenv("SUPABASE_SERVICE_KEY") else "NON",
-            "RAILWAY_SUPABASE_URL": "OUI" if os.getenv("RAILWAY_SUPABASE_URL") else "NON",
-            "DATABASE_URL": "OUI" if os.getenv("DATABASE_URL") else "NON",
-        },
-        "safe_env": safe_env
-    }
+
 
 
 # =============================================================================
-# WEBHOOK WHATSAPP v3 - SIMPLE & EFFICACE
+# WHATSAPP HANDLER (module externe — whatsapp_handler.py)
 # =============================================================================
-# 
-# REMPLACE TOUT depuis la ligne:
-#   "# États de conversation" (environ ligne 3200)
-# JUSQU'À la fin du fichier
-#
-# AVANTAGES:
-# - Claude Haiku = 10x moins cher que Sonnet
-# - IA comprend TOUT (pas de mots-clés stricts)
-# - Menus texte avec numéros (compatible tous téléphones)
-# - Intégré avec Supabase/Dashboard
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# =============================================================================
-# WEBHOOK WHATSAPP v6 - FLOW COMPLET STRUCTURÉ
-# =============================================================================
-#
-# INSTRUCTIONS D'INTÉGRATION:
-# 1. Dans main.py, cherche "# ==================== ASSISTANT IA WHATSAPP =="
-# 2. SUPPRIME tout depuis cette ligne jusqu'à la fin du fichier
-# 3. COLLE ce code à la place
-# 4. Ajoute "import resend" en haut si pas déjà présent
-#
-# =============================================================================
-
-# ==================== ASSISTANT IA WHATSAPP ====================
-# Remplacé par le module whatsapp_handler.py (state machine v8)
 
 from whatsapp_handler import router as whatsapp_router, setup as whatsapp_setup
 
