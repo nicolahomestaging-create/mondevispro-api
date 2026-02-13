@@ -158,6 +158,8 @@ class State:
     DOCS_ENVOYER_EMAIL = "docs_envoyer_email"
     DOCS_SIGNATURE_CHOIX = "docs_signature_choix"
     DOCS_CONFIRMER_SUPPR = "docs_confirmer_suppr"
+    # Post-envoi
+    POST_ENVOI = "post_envoi"
 
 
 # =============================================================================
@@ -801,7 +803,7 @@ def parse_prestations_regex(texte: str) -> List[Dict]:
             continue
         # Pattern 1: "Carrelage 30m2 50€"
         m = re.match(
-            r'(.+?)\s+(\d+[.,]?\d*)\s*(m2|m²|ml|m|h|u|jours?|kg|l)\s*(?:[xX×àa@]\s*)?(\d+[.,]?\d*)\s*€?',
+            r'(.+?)\s+(\d+[.,]?\d*)\s*(m2|m²|ml|m|h|u|jours?|kg|l)\s*(?:[xX×àa@]\s*)?(\d+[.,]?\d*)\s*(?:€|euros?|eur)',
             line, re.IGNORECASE
         )
         if m:
@@ -813,7 +815,7 @@ def parse_prestations_regex(texte: str) -> List[Dict]:
                 prestations.append({"description": desc.capitalize(), "quantite": qte, "unite": unite, "prix_unitaire": prix})
                 continue
         # Pattern 2: "Peinture forfait 800€"
-        m = re.match(r'(.+?)\s+(?:forfait\s+)?(\d+[.,]?\d*)\s*€', line, re.IGNORECASE)
+        m = re.match(r'(.+?)\s+(?:forfait\s+)?(\d+[.,]?\d*)\s*(?:€|euros?|eur)', line, re.IGNORECASE)
         if m:
             desc = m.group(1).strip().rstrip('-–—:').strip()
             prix = float(m.group(2).replace(',', '.'))
@@ -821,7 +823,7 @@ def parse_prestations_regex(texte: str) -> List[Dict]:
                 prestations.append({"description": desc.capitalize(), "quantite": 1, "unite": "forfait", "prix_unitaire": prix})
                 continue
         # Pattern 3: "800€ peinture"
-        m = re.match(r'(\d+[.,]?\d*)\s*(?:€|euros?)\s+(.+)', line, re.IGNORECASE)
+        m = re.match(r'(\d+[.,]?\d*)\s*(?:€|euros?|eur)\s+(.+)', line, re.IGNORECASE)
         if m:
             prix = float(m.group(1).replace(',', '.'))
             desc = m.group(2).strip()
@@ -830,8 +832,8 @@ def parse_prestations_regex(texte: str) -> List[Dict]:
                 continue
     if not prestations:
         for pattern_fn in [
-            lambda t: re.match(r'(.+?)\s+(\d+[.,]?\d*)\s*(m2|m²|ml|m|h|u|jours?|kg|l)\s*(?:[xX×àa@]\s*)?(\d+[.,]?\d*)\s*€?', t, re.IGNORECASE),
-            lambda t: re.match(r'(.+?)\s+(?:forfait\s+)?(\d+[.,]?\d*)\s*€', t, re.IGNORECASE),
+            lambda t: re.match(r'(.+?)\s+(\d+[.,]?\d*)\s*(m2|m²|ml|m|h|u|jours?|kg|l)\s*(?:[xX×àa@]\s*)?(\d+[.,]?\d*)\s*(?:€|euros?|eur)', t, re.IGNORECASE),
+            lambda t: re.match(r'(.+?)\s+(?:forfait\s+)?(\d+[.,]?\d*)\s*(?:€|euros?|eur)', t, re.IGNORECASE),
         ]:
             m = pattern_fn(texte_clean)
             if m:
@@ -848,7 +850,7 @@ def parse_prestations_regex(texte: str) -> List[Dict]:
 
 def parse_express_devis(texte: str) -> Optional[Dict]:
     phone_match = re.search(r'(0\d[\s.]?\d{2}[\s.]?\d{2}[\s.]?\d{2}[\s.]?\d{2})', texte)
-    price_match = re.search(r'\d+[.,]?\d*\s*€', texte)
+    price_match = re.search(r'\d+[.,]?\d*\s*(?:€|euros?|eur)', texte, re.IGNORECASE)
     if not phone_match or not price_match:
         return None
     tel = re.sub(r'[^0-9]', '', phone_match.group(1))
@@ -916,17 +918,19 @@ def transcribe_audio(audio_url: str) -> str:
         if resp.status_code != 200:
             return ""
         temp_file = f"/tmp/audio_{uuid.uuid4().hex}.ogg"
-        with open(temp_file, "wb") as f:
-            f.write(resp.content)
-        with open(temp_file, "rb") as audio_file:
-            transcript = openai_whisper_client.audio.transcriptions.create(
-                model="whisper-1", file=audio_file, language="fr"
-            )
         try:
-            os.remove(temp_file)
-        except:
-            pass
-        return transcript.text.strip()
+            with open(temp_file, "wb") as f:
+                f.write(resp.content)
+            with open(temp_file, "rb") as audio_file:
+                transcript = openai_whisper_client.audio.transcriptions.create(
+                    model="whisper-1", file=audio_file, language="fr"
+                )
+            return transcript.text.strip()
+        finally:
+            try:
+                os.remove(temp_file)
+            except:
+                pass
     except Exception as e:
         logger.error(f"Erreur Whisper: {e}")
         return ""
@@ -1411,6 +1415,7 @@ def handle_message(phone: str, message: str, media_url: str = None, media_type: 
             State.DEVIS_DELAI: State.DEVIS_RECAP,
             State.DEVIS_COMPLETER: State.DEVIS_RECAP,
             State.DOCS_DETAIL: State.DOCS_LISTE,
+            State.POST_ENVOI: State.MENU,
         }
         if state in retour_map:
             conv["state"] = retour_map[state]
@@ -2453,10 +2458,59 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
         
         send_whatsapp(phone_full, "\n".join(next_actions))
         
-        # Transition vers un état temporaire pour gérer le "aussi par email"
-        conv["state"] = State.MENU  # Simplifié - retour menu
+        # État dédié pour gérer les actions post-envoi
+        conv["state"] = State.POST_ENVOI
         conv["data"]["_post_send"] = send_doc
         save_conv(phone, conv)
+        return
+    
+    # =========================================================================
+    # POST-ENVOI (après envoi WhatsApp réussi)
+    # =========================================================================
+    
+    if state == State.POST_ENVOI:
+        post_doc = data.get("_post_send", {})
+        doc_type = post_doc.get("doc_type", "devis")
+        
+        if msg_lower == "1":
+            # Envoyer aussi par email
+            email = post_doc.get("client_email", post_doc.get("default_email", ""))
+            conv["data"]["send_doc"] = post_doc
+            if doc_type == "devis":
+                conv["state"] = State.DOCS_SIGNATURE_CHOIX
+                save_conv(phone, conv)
+                if email:
+                    send_whatsapp(phone_full, f"📧 Envoyer à *{email}* ?\n\n*1.* ✍️ Avec signature\n*2.* 📄 Sans signature\n*3.* 📝 Autre email\n*4.* ❌ Non")
+                else:
+                    conv["state"] = State.DOCS_ENVOYER_EMAIL
+                    save_conv(phone, conv)
+                    send_whatsapp(phone_full, "📧 Entrez l'email du client :")
+            else:
+                conv["state"] = State.DOCS_ENVOYER_EMAIL
+                conv["data"]["send_doc"]["default_email"] = email
+                save_conv(phone, conv)
+                if email:
+                    send_whatsapp(phone_full, f"📧 Envoyer à *{email}* ?\n\n*1.* ✅ Oui   *2.* 📝 Autre email   *3.* ❌ Non")
+                else:
+                    send_whatsapp(phone_full, "📧 Entrez l'email du client :")
+            return
+        
+        if doc_type == "devis":
+            if msg_lower == "2":
+                reset_conv(phone)
+                handle_message(phone, "1")  # Nouveau devis
+                return
+            if msg_lower == "3":
+                reset_conv(phone)
+                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+                return
+        else:
+            if msg_lower == "2":
+                reset_conv(phone)
+                send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
+                return
+        
+        send_whatsapp(phone_full, "Tapez un numéro pour choisir" + NAV_MENU_ONLY)
         return
     
     # =========================================================================
@@ -3490,7 +3544,7 @@ def _send_email_action(phone: str, phone_full: str, conv: Dict, email: str, avec
 # =============================================================================
 
 @router.post("/webhook/whatsapp")
-async def whatsapp_webhook(
+def whatsapp_webhook(
     From: str = Form(""),
     Body: str = Form(""),
     MediaUrl0: Optional[str] = Form(None),
