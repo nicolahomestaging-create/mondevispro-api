@@ -242,7 +242,7 @@ def send_whatsapp(to: str, body: str):
             "From": f"whatsapp:{TWILIO_WHATSAPP_NUMBER}",
             "To": to,
             "Body": body,
-        }, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        }, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), timeout=10)
         if resp.status_code in [200, 201]:
             logger.info(f"Message envoyé à {to}: {body[:50]}...")
             return True
@@ -268,7 +268,7 @@ def send_whatsapp_template(to: str, template_sid: str):
             "From": f"whatsapp:{TWILIO_WHATSAPP_NUMBER}",
             "To": to,
             "ContentSid": template_sid,
-        }, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        }, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), timeout=10)
         if resp.status_code in [200, 201]:
             return True
         else:
@@ -296,7 +296,7 @@ def send_whatsapp_document(to: str, pdf_url: str, caption: str = ""):
         }
         if caption:
             data["Body"] = caption
-        resp = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        resp = requests.post(url, data=data, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), timeout=15)
         return resp.status_code in [200, 201]
     except Exception as e:
         logger.error(f"Erreur envoi document: {e}")
@@ -440,8 +440,27 @@ def send_email_facture(to_email: str, entreprise: Dict, facture: Dict):
 # FONCTIONS DB HELPERS
 # =============================================================================
 
+import time as _time
+
+# Cache entreprise (5 min TTL) pour réduire les queries Supabase
+_entreprise_cache: Dict[str, tuple] = {}  # phone -> (data, timestamp)
+_CACHE_TTL = 300  # 5 minutes
+
 def get_entreprise(phone: str) -> Optional[Dict]:
-    return get_entreprise_by_whatsapp(phone)
+    now = _time.time()
+    if phone in _entreprise_cache:
+        cached_data, ts = _entreprise_cache[phone]
+        if now - ts < _CACHE_TTL:
+            return cached_data
+    data = get_entreprise_by_whatsapp(phone)
+    if data:
+        _entreprise_cache[phone] = (data, now)
+    return data
+
+
+def invalidate_entreprise_cache(phone: str):
+    """Invalide le cache pour forcer un refresh (après upgrade plan, etc.)"""
+    _entreprise_cache.pop(phone, None)
 
 
 # ==================== GESTION DES PLANS ====================
@@ -1329,8 +1348,42 @@ def _build_devis_action_map(doc: Dict, factures: List[Dict], is_free: bool, stat
 # HANDLER PRINCIPAL - STATE MACHINE (v9)
 # =============================================================================
 
+_cleanup_counter = 0
+
+def _cleanup_stale_data():
+    """Purge conversations inactives > 2h et caches expirés"""
+    now = datetime.now()
+    now_ts = _time.time()
+    
+    # Conversations RAM
+    stale = [p for p, c in _conversations.items()
+             if (now - c.get("last_activity", now)).total_seconds() > 7200]
+    for p in stale:
+        del _conversations[p]
+    
+    # Cache entreprise expiré
+    stale_cache = [p for p, (_, ts) in _entreprise_cache.items()
+                   if now_ts - ts > _CACHE_TTL * 2]
+    for p in stale_cache:
+        del _entreprise_cache[p]
+    
+    # Dedup SIDs vieux
+    old_sids = [s for s, t in _processed_sids.items()
+                if (now - t).total_seconds() > 300]
+    for s in old_sids:
+        del _processed_sids[s]
+    
+    if stale or stale_cache:
+        logger.info(f"🧹 Cleanup: {len(stale)} convs, {len(stale_cache)} cache, {len(old_sids)} sids")
+
+
 def handle_message(phone: str, message: str, media_url: str = None, media_type: str = None, button_payload: str = None):
     """Gère un message WhatsApp entrant — v9 copain pro"""
+    global _cleanup_counter
+    _cleanup_counter += 1
+    if _cleanup_counter % 50 == 0:
+        _cleanup_stale_data()
+    
     phone = normalize_phone(phone)
     phone_full = f"+{phone}"
     msg = (message or "").strip()
