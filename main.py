@@ -757,32 +757,32 @@ def dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_valid
     """Dessine l'en-tête de page (pour la première page et les pages suivantes)"""
     print(f"🔍 dessiner_en_tete_page - numero_devis reçu: '{numero_devis}'")
     c.setFillColor(get_couleur_principale(data))
-    c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
+    c.rect(0, height - 38*mm, width, 38*mm, fill=True, stroke=False)
     
     text_start_x = 15*mm
     
     if logo:
         try:
-            logo_size = 30*mm
-            c.drawImage(logo, 15*mm, height - 40*mm, width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
-            text_start_x = 50*mm
+            logo_size = 26*mm
+            c.drawImage(logo, 15*mm, height - 34*mm, width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
+            text_start_x = 46*mm
         except Exception as e:
             print(f"Erreur logo: {e}")
     
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(text_start_x, height - 18*mm, tronquer_texte(data.entreprise.nom.upper(), 30))
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(text_start_x, height - 16*mm, tronquer_texte(data.entreprise.nom.upper(), 30))
     
     if data.entreprise.gerant and data.entreprise.gerant.strip():
-        c.setFont("Helvetica", 9)
-        c.drawString(text_start_x, height - 26*mm, f"Gérant : {data.entreprise.gerant}")
+        c.setFont("Helvetica", 8)
+        c.drawString(text_start_x, height - 23*mm, f"Gérant : {data.entreprise.gerant}")
     
-    c.setFont("Helvetica-Bold", 28)
-    c.drawRightString(width - 20*mm, height - 18*mm, "DEVIS")
-    c.setFont("Helvetica", 11)
-    c.drawRightString(width - 20*mm, height - 28*mm, f"N° {numero_devis}")
+    c.setFont("Helvetica-Bold", 24)
+    c.drawRightString(width - 20*mm, height - 16*mm, "DEVIS")
+    c.setFont("Helvetica", 10)
+    c.drawRightString(width - 20*mm, height - 25*mm, f"N° {numero_devis}")
     c.setFont("Helvetica", 9)
-    c.drawRightString(width - 20*mm, height - 36*mm, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
+    c.drawRightString(width - 20*mm, height - 33*mm, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
 
 
 def dessiner_totaux(c, width, y_totaux, total_ht, total_ht_avant_acompte, total_acompte, remise, tva_taux, total_ht_final, total_ttc, data):
@@ -1948,7 +1948,7 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
         
         if est_premiere_page:
             # Dessiner les blocs emetteur/client sur la première page uniquement
-            y_position = height - 60*mm
+            y_position = height - 52*mm
             dessiner_bloc_emetteur(c, width, height, data, y_position)
             dessiner_bloc_client(c, width, height, data, y_position)
             
@@ -1959,7 +1959,7 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
             y_table = y_position - 42*mm
         else:
             # Sur les pages suivantes, le tableau commence plus haut
-            y_table = height - 55*mm
+            y_table = height - 48*mm
         
         # Dessiner les lignes de prestations
         index_debut = page_num * lignes_par_page
@@ -1991,11 +1991,11 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
             c.drawString(20*mm, y_signature - 26*mm, "(Précédée de \"Bon pour accord\")")
             
             # Vérifier s'il y a assez d'espace pour les conditions APRÈS les totaux/signature
-            hauteur_conditions = 28*mm
+            hauteur_conditions = 32*mm
             espace_necessaire_conditions = hauteur_conditions + 22*mm  # 22mm marge pour le footer
             # Position des conditions après la signature (prendre le plus bas entre signature et totaux)
             y_bas_signature = y_signature - 28*mm
-            y_conditions_possible = min(y_fin_totaux, y_bas_signature) - 10*mm
+            y_conditions_possible = min(y_fin_totaux, y_bas_signature) - 15*mm
             
             # Si pas assez d'espace pour les conditions sur cette page, créer une nouvelle page
             if y_conditions_possible < espace_necessaire_conditions:
@@ -2004,24 +2004,24 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
                 # Créer une nouvelle page pour les conditions
                 c.showPage()
                 dessiner_en_tete_page(c, width, height, data, numero_devis, logo, date_validite)
-                y_conditions = height - 55*mm
+                y_conditions = height - 48*mm
             else:
                 # Dessiner les conditions sur la même page, APRÈS les totaux/signature
                 y_conditions = y_conditions_possible
             
             # Dessiner les conditions
             c.setFillColor(GRIS_CLAIR)
-            c.roundRect(15*mm, y_conditions - 18*mm, width - 30*mm, 28*mm, 3*mm, fill=True, stroke=False)
+            c.roundRect(15*mm, y_conditions - 24*mm, width - 30*mm, 32*mm, 3*mm, fill=True, stroke=False)
             
             c.setFillColor(get_couleur_principale(data))
             c.setFont("Helvetica-Bold", 10)
             c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
             
             c.setFillColor(GRIS_FONCE)
-            c.setFont("Helvetica", 8)
-            c.drawString(20*mm, y_conditions - 6*mm, f"• Délai de réalisation : {data.delai_realisation}")
-            c.drawString(20*mm, y_conditions - 12*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
-            c.drawString(20*mm, y_conditions - 18*mm, f"• Devis valable jusqu'au : {date_validite}")
+            c.setFont("Helvetica", 9)
+            c.drawString(20*mm, y_conditions - 7*mm, f"• Délai de réalisation : {data.delai_realisation}")
+            c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
+            c.drawString(20*mm, y_conditions - 21*mm, f"• Devis valable jusqu'au : {date_validite}")
             
             # Dessiner le footer sur cette page (avec totaux, signature et conditions)
             dessiner_pied_page(c, width, data, mention_tva)
@@ -2075,30 +2075,30 @@ def generer_pdf_facture(data: FactureRequest, numero_facture_force: Optional[str
     width, height = A4
     
     c.setFillColor(get_couleur_principale(data))
-    c.rect(0, height - 45*mm, width, 45*mm, fill=True, stroke=False)
+    c.rect(0, height - 38*mm, width, 38*mm, fill=True, stroke=False)
     
     text_start_x = 15*mm
     
     if logo:
         try:
-            logo_size = 30*mm
-            c.drawImage(logo, 15*mm, height - 40*mm, width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
-            text_start_x = 50*mm
+            logo_size = 26*mm
+            c.drawImage(logo, 15*mm, height - 34*mm, width=logo_size, height=logo_size, preserveAspectRatio=True, mask='auto')
+            text_start_x = 46*mm
         except Exception as e:
             print(f"Erreur logo: {e}")
     
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(text_start_x, height - 18*mm, tronquer_texte(data.entreprise.nom.upper(), 30))
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(text_start_x, height - 16*mm, tronquer_texte(data.entreprise.nom.upper(), 30))
     
     if data.entreprise.gerant and data.entreprise.gerant.strip():
-        c.setFont("Helvetica", 9)
-        c.drawString(text_start_x, height - 26*mm, f"Gérant : {data.entreprise.gerant}")
+        c.setFont("Helvetica", 8)
+        c.drawString(text_start_x, height - 23*mm, f"Gérant : {data.entreprise.gerant}")
     
-    c.setFont("Helvetica-Bold", 28)
-    c.drawRightString(width - 20*mm, height - 18*mm, "FACTURE")
-    c.setFont("Helvetica", 11)
-    c.drawRightString(width - 20*mm, height - 28*mm, f"N° {numero_facture}")
+    c.setFont("Helvetica-Bold", 24)
+    c.drawRightString(width - 20*mm, height - 16*mm, "FACTURE")
+    c.setFont("Helvetica", 10)
+    c.drawRightString(width - 20*mm, height - 25*mm, f"N° {numero_facture}")
     
     # Vérifier si la facture est payée
     est_payee = hasattr(data, 'statut') and data.statut == 'payee'
@@ -2106,21 +2106,21 @@ def generer_pdf_facture(data: FactureRequest, numero_facture_force: Optional[str
     if est_payee:
         # Afficher "PAYÉE" en vert à côté du numéro
         c.setFillColor(HexColor('#27ae60'))  # Vert pour "PAYÉE"
-        c.setFont("Helvetica-Bold", 12)
-        c.drawRightString(width - 20*mm, height - 36*mm, "PAYÉE")
+        c.setFont("Helvetica-Bold", 11)
+        c.drawRightString(width - 20*mm, height - 33*mm, "PAYÉE")
         c.setFillColor(white)  # Remettre la couleur blanche pour la suite
     
     c.setFont("Helvetica", 9)
     c.setFillColor(white)
-    y_date = height - 42*mm if est_payee else height - 36*mm
+    y_date = height - 35*mm if est_payee else height - 33*mm
     c.drawRightString(width - 20*mm, y_date, f"Date : {datetime.now().strftime('%d/%m/%Y')}")
     
     if data.numero_devis_origine:
         c.setFont("Helvetica", 8)
-        y_ref_devis = y_date - 6*mm
+        y_ref_devis = y_date - 5*mm
         c.drawRightString(width - 20*mm, y_ref_devis, f"Réf. devis : {data.numero_devis_origine}")
     
-    y_position = height - 60*mm
+    y_position = height - 52*mm
     dessiner_bloc_emetteur(c, width, height, data, y_position)
     dessiner_bloc_client(c, width, height, data, y_position)
     
