@@ -966,9 +966,9 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
         
         # Hauteur de base + lignes supplémentaires
         if nb_lignes_total <= 1:
-            hauteur_ligne = 10*mm
+            hauteur_ligne = 8*mm
         else:
-            hauteur_ligne = 8*mm + (nb_lignes_total * 3.5*mm)
+            hauteur_ligne = 6*mm + (nb_lignes_total * 3.5*mm)
         
         y_ligne -= hauteur_ligne
         
@@ -1026,7 +1026,7 @@ def dessiner_lignes_prestations(c, width, prestations, y_table, data, index_debu
     c.setLineWidth(1)
     c.line(15*mm, y_ligne, width - 15*mm, y_ligne)
     
-    return y_ligne - 10*mm, total_ht_avant_acompte, total_acompte
+    return y_ligne - 5*mm, total_ht_avant_acompte, total_acompte
 
 
 def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, lignes_finales, acompte_ttc, acompte_refs):
@@ -1096,9 +1096,9 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
         nb_lignes_total += len(lignes_notes)
         
         if nb_lignes_total <= 1:
-            hauteur_ligne = 10*mm
+            hauteur_ligne = 8*mm
         else:
-            hauteur_ligne = 8*mm + (nb_lignes_total * 3.5*mm)
+            hauteur_ligne = 6*mm + (nb_lignes_total * 3.5*mm)
         
         y_ligne -= hauteur_ligne
         
@@ -1183,7 +1183,7 @@ def dessiner_facture_depuis_lignes_finales(c, width, data, y_table, tva_taux, li
     # ============================================================
     # AFFICHAGE DES TOTAUX AVEC REMISE
     # ============================================================
-    y_totaux = y_ligne - 10*mm
+    y_totaux = y_ligne - 5*mm
     x_label = 130*mm
     x_value = width - 18*mm
     
@@ -1451,7 +1451,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         total_ht_final = float(total_ht_fourni) if total_ht_fourni is not None else total_ht_calc
         
         # Totaux
-        y_totaux = y_ligne - 10*mm
+        y_totaux = y_ligne - 5*mm
         x_label = 130*mm
         x_value = width - 18*mm
         
@@ -1542,9 +1542,9 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
         nb_lignes_total += len(lignes_notes)
         
         if nb_lignes_total <= 1:
-            hauteur_ligne = 10*mm
+            hauteur_ligne = 8*mm
         else:
-            hauteur_ligne = 8*mm + (nb_lignes_total * 3.5*mm)
+            hauteur_ligne = 6*mm + (nb_lignes_total * 3.5*mm)
         
         y_ligne -= hauteur_ligne
         
@@ -1660,7 +1660,7 @@ def dessiner_tableau_prestations(c, width, data, y_table, tva_taux):
     # ============================================================
     # AFFICHAGE DES TOTAUX
     # ============================================================
-    y_totaux = y_ligne - 10*mm
+    y_totaux = y_ligne - 5*mm
     x_label = 130*mm
     x_value = width - 18*mm
     
@@ -1925,7 +1925,7 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
     print(f"📋 Données finales - remise: {remise:.2f}, remise_type dans data: '{getattr(data, 'remise_type', None)}', remise_valeur dans data: {getattr(data, 'remise_valeur', None)}")
     
     # Pagination : diviser les prestations en groupes
-    lignes_par_page = 11  # Nombre de lignes par page
+    lignes_par_page = 14  # Nombre de lignes par page
     prestations_groupes = []
     for i in range(0, len(data.prestations), lignes_par_page):
         prestations_groupes.append(data.prestations[i:i + lignes_par_page])
@@ -1956,7 +1956,7 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
             c.setFont("Helvetica", 9)
             c.drawRightString(width - 20*mm, y_position - 28*mm, f"Validité : {date_validite}")
             
-            y_table = y_position - 50*mm
+            y_table = y_position - 42*mm
         else:
             # Sur les pages suivantes, le tableau commence plus haut
             y_table = height - 55*mm
@@ -1979,23 +1979,23 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
             y_signature = y_totaux - 5*mm
             c.setStrokeColor(GRIS_CLAIR)
             c.setLineWidth(1)
-            c.roundRect(15*mm, y_signature - 35*mm, 80*mm, 40*mm, 3*mm, fill=False, stroke=True)
+            c.roundRect(15*mm, y_signature - 28*mm, 80*mm, 32*mm, 3*mm, fill=False, stroke=True)
             
             c.setFillColor(GRIS_TEXTE)
             c.setFont("Helvetica-Bold", 9)
             c.drawString(20*mm, y_signature - 3*mm, "Bon pour accord")
             c.setFont("Helvetica", 8)
-            c.drawString(20*mm, y_signature - 13*mm, "Date :")
-            c.drawString(20*mm, y_signature - 23*mm, "Signature :")
+            c.drawString(20*mm, y_signature - 11*mm, "Date :")
+            c.drawString(20*mm, y_signature - 19*mm, "Signature :")
             c.setFont("Helvetica-Oblique", 7)
-            c.drawString(20*mm, y_signature - 31*mm, "(Précédée de \"Bon pour accord\")")
+            c.drawString(20*mm, y_signature - 26*mm, "(Précédée de \"Bon pour accord\")")
             
             # Vérifier s'il y a assez d'espace pour les conditions APRÈS les totaux/signature
-            hauteur_conditions = 35*mm
-            espace_necessaire_conditions = hauteur_conditions + 40*mm  # 40mm marge pour le footer
+            hauteur_conditions = 28*mm
+            espace_necessaire_conditions = hauteur_conditions + 22*mm  # 22mm marge pour le footer
             # Position des conditions après la signature (prendre le plus bas entre signature et totaux)
-            y_bas_signature = y_signature - 35*mm
-            y_conditions_possible = min(y_fin_totaux, y_bas_signature) - 45*mm
+            y_bas_signature = y_signature - 28*mm
+            y_conditions_possible = min(y_fin_totaux, y_bas_signature) - 10*mm
             
             # Si pas assez d'espace pour les conditions sur cette page, créer une nouvelle page
             if y_conditions_possible < espace_necessaire_conditions:
@@ -2011,17 +2011,17 @@ def generer_pdf_devis(data: DevisRequest, numero_devis_force: Optional[str] = No
             
             # Dessiner les conditions
             c.setFillColor(GRIS_CLAIR)
-            c.roundRect(15*mm, y_conditions - 25*mm, width - 30*mm, 35*mm, 3*mm, fill=True, stroke=False)
+            c.roundRect(15*mm, y_conditions - 18*mm, width - 30*mm, 28*mm, 3*mm, fill=True, stroke=False)
             
             c.setFillColor(get_couleur_principale(data))
             c.setFont("Helvetica-Bold", 10)
             c.drawString(20*mm, y_conditions + 2*mm, "CONDITIONS")
             
             c.setFillColor(GRIS_FONCE)
-            c.setFont("Helvetica", 9)
-            c.drawString(20*mm, y_conditions - 8*mm, f"• Délai de réalisation : {data.delai_realisation}")
-            c.drawString(20*mm, y_conditions - 14*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
-            c.drawString(20*mm, y_conditions - 20*mm, f"• Devis valable jusqu'au : {date_validite}")
+            c.setFont("Helvetica", 8)
+            c.drawString(20*mm, y_conditions - 6*mm, f"• Délai de réalisation : {data.delai_realisation}")
+            c.drawString(20*mm, y_conditions - 12*mm, f"• Conditions de paiement : {data.entreprise.conditions_paiement or data.conditions_paiement}")
+            c.drawString(20*mm, y_conditions - 18*mm, f"• Devis valable jusqu'au : {date_validite}")
             
             # Dessiner le footer sur cette page (avec totaux, signature et conditions)
             dessiner_pied_page(c, width, data, mention_tva)
@@ -2129,10 +2129,10 @@ def generer_pdf_facture(data: FactureRequest, numero_facture_force: Optional[str
     if not est_payee:
         c.drawRightString(width - 20*mm, y_position - 28*mm, f"Échéance : {date_echeance}")
     
-    y_table = y_position - 50*mm
+    y_table = y_position - 42*mm
     y_totaux, total_ht, total_ttc = dessiner_tableau_prestations(c, width, data, y_table, data.tva_taux)
     
-    y_paiement = y_totaux - 45*mm
+    y_paiement = y_totaux - 30*mm
     c.setFillColor(GRIS_CLAIR)
     c.roundRect(15*mm, y_paiement - 30*mm, width - 30*mm, 40*mm, 3*mm, fill=True, stroke=False)
     
