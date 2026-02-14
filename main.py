@@ -2876,28 +2876,27 @@ async def generer_facture_endpoint(data: FactureRequest):
             total_ttc_devis = getattr(data, 'total_ttc_devis', None)
             
             if total_ht_devis and total_ttc_devis:
-                # Utiliser les totaux du devis (avec remise déjà appliquée)
+                # Totaux ORIGINAUX du devis → appliquer le taux d'acompte
                 print(f"📊 UTILISATION DES TOTAUX DU DEVIS (avec remise):")
                 print(f"   Total HT devis: {total_ht_devis}")
                 print(f"   Total TTC devis: {total_ttc_devis}")
-                total_ht_base = total_ht_devis
-                total_ttc_base = total_ttc_devis
+                total_ht_acompte = round(float(total_ht_devis) * taux_acompte / 100, 2)
+                total_ttc_acompte = round(float(total_ttc_devis) * taux_acompte / 100, 2)
             else:
-                # Fallback : Calculer à partir des prestations (sans remise)
+                # Fallback : les prestations contiennent DÉJÀ le montant d'acompte
+                # (le handler a créé une prestation "Acompte 30% - ..." avec le bon prix)
+                # NE PAS re-appliquer le taux sinon double calcul !
                 tva_taux = getattr(data.entreprise, 'tva_taux', 20) or 20
-                total_ht_base = 0
+                total_ht_acompte = 0
                 for p in data.prestations:
-                    total_ht_base += p.prix_unitaire * p.quantite
-                total_ttc_base = total_ht_base * (1 + tva_taux / 100)
-                print(f"⚠️ CALCUL DEPUIS PRESTATIONS (sans remise):")
-                print(f"   Total HT calculé: {total_ht_base}")
-                print(f"   Total TTC calculé: {total_ttc_base}")
+                    total_ht_acompte += p.prix_unitaire * p.quantite
+                total_ttc_acompte = round(total_ht_acompte * (1 + tva_taux / 100), 2)
+                total_ht_acompte = round(total_ht_acompte, 2)
+                print(f"📊 ACOMPTE DEPUIS PRESTATIONS (montant déjà calculé):")
+                print(f"   Total HT acompte: {total_ht_acompte}")
+                print(f"   Total TTC acompte: {total_ttc_acompte}")
             
-            # Appliquer le taux d'acompte
-            total_ht_acompte = round(total_ht_base * taux_acompte / 100, 2)
-            total_ttc_acompte = round(total_ttc_base * taux_acompte / 100, 2)
-            
-            print(f"📊 CALCUL ACOMPTE:")
+            print(f"📊 RÉSULTAT ACOMPTE:")
             print(f"   Taux acompte: {taux_acompte}%")
             print(f"   Total HT acompte: {total_ht_acompte}")
             print(f"   Total TTC acompte: {total_ttc_acompte}")
