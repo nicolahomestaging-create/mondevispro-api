@@ -321,8 +321,11 @@ def send_email_devis(to_email: str, entreprise: Dict, devis: Dict, avec_signatur
     signature_html = ""
     if avec_signature:
         devis_uuid = devis.get("id", "")
+        logger.info(f"🔗 SIGNATURE - devis_uuid: '{devis_uuid}' (type: {type(devis_uuid)})")
+        logger.info(f"   devis keys: {list(devis.keys())}")
         if devis_uuid:
-            signature_url = f"https://www.vocario.fr/signer/{devis_uuid}"
+            signature_url = f"https://vocario.fr/signer/{devis_uuid}"
+            logger.info(f"   URL signature: {signature_url}")
             signature_html = f'''
             <div style="text-align:center; margin:20px 0;">
                 <a href="{signature_url}" style="background-color:{couleur}; color:white; padding:15px 30px; text-decoration:none; border-radius:8px; font-size:16px; font-weight:bold;">
@@ -330,6 +333,8 @@ def send_email_devis(to_email: str, entreprise: Dict, devis: Dict, avec_signatur
                 </a>
             </div>
             '''
+        else:
+            logger.error(f"❌ SIGNATURE - UUID vide ! devis data: {devis}")
     html = f'''
     <div style="max-width:600px; margin:0 auto; font-family:Arial,sans-serif;">
         <div style="background-color:{couleur}; padding:20px; text-align:center;">
@@ -1907,7 +1912,76 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
             save_conv(phone, conv)
             _show_recap(phone, phone_full, conv)
             return
-        send_whatsapp(phone_full, "Tapez un numéro (1-6) ou *retour*")
+        
+        # IA PARSING : texte libre multi-champs
+        # Extraire email, adresse, projet, remise, acompte, délai depuis un message libre
+        updated = []
+        remaining_text = msg
+        
+        # Email
+        email_match = re.search(r'[\w.+-]+@[\w.-]+\.\w{2,}', remaining_text)
+        if email_match and not data.get("client_email"):
+            data["client_email"] = email_match.group(0).lower()
+            updated.append(f"📧 {data['client_email']}")
+            remaining_text = remaining_text.replace(email_match.group(0), "").strip()
+        
+        # Remise (ex: "remise 20%", "20% de remise", "remise 15")
+        remise_match = re.search(r'remise\s*:?\s*(\d+)\s*%?|(\d+)\s*%?\s*(?:de\s+)?remise', remaining_text, re.IGNORECASE)
+        if remise_match and not data.get("remise_type"):
+            val = remise_match.group(1) or remise_match.group(2)
+            if val:
+                data["remise_type"] = "pourcentage"
+                data["remise_valeur"] = float(val)
+                updated.append(f"🏷️ Remise {val}%")
+                remaining_text = remaining_text[:remise_match.start()] + remaining_text[remise_match.end():]
+                remaining_text = remaining_text.strip()
+        
+        # Acompte (ex: "acompte 30%", "30% acompte")
+        acompte_match = re.search(r'acompte\s*:?\s*(\d+)\s*%?|(\d+)\s*%?\s*(?:d\'?\s*)?acompte', remaining_text, re.IGNORECASE)
+        if acompte_match and not data.get("acompte_pourcentage"):
+            val = acompte_match.group(1) or acompte_match.group(2)
+            if val:
+                data["acompte_pourcentage"] = float(val)
+                updated.append(f"💰 Acompte {val}%")
+                remaining_text = remaining_text[:acompte_match.start()] + remaining_text[acompte_match.end():]
+                remaining_text = remaining_text.strip()
+        
+        # Délai (ex: "délai 2 semaines", "délai : 3 jours")
+        delai_match = re.search(r'(?:^|\n)\s*d[ée]lai\s*:?\s*(.+)', remaining_text, re.IGNORECASE)
+        if delai_match and not data.get("delai"):
+            data["delai"] = delai_match.group(1).strip()
+            updated.append(f"⏱️ {data['delai']}")
+            remaining_text = remaining_text[:delai_match.start()] + remaining_text[delai_match.end():]
+            remaining_text = remaining_text.strip()
+        
+        # Projet (ex: "projet : cuisine Reno", "projet cuisine")
+        # Match only when "projet" starts the line (not in "Rue des projet")
+        projet_match = re.search(r'(?:^|\n)\s*projet\s*:?\s*(.+)', remaining_text, re.IGNORECASE)
+        if projet_match and not data.get("titre_projet"):
+            data["titre_projet"] = projet_match.group(1).strip()
+            updated.append(f"🏗️ {data['titre_projet']}")
+            remaining_text = remaining_text[:projet_match.start()] + remaining_text[projet_match.end():]
+            remaining_text = remaining_text.strip()
+        
+        # Adresse : ce qui reste (si c'est du texte et pas un numéro)
+        remaining_lines = [l.strip() for l in remaining_text.split("\n") if l.strip() and not l.strip().isdigit()]
+        if remaining_lines and not data.get("client_adresse"):
+            # Prendre la première ligne restante comme adresse
+            adresse_candidate = remaining_lines[0]
+            if len(adresse_candidate) > 3 and not adresse_candidate.startswith(("oui", "non", "retour", "menu")):
+                data["client_adresse"] = adresse_candidate
+                updated.append(f"📍 {adresse_candidate}")
+        
+        if updated:
+            conv["data"] = data
+            conv["state"] = State.DEVIS_RECAP
+            save_conv(phone, conv)
+            confirmation = "✅ C'est noté !\n\n" + "\n".join(updated)
+            send_whatsapp(phone_full, confirmation)
+            _show_recap(phone, phone_full, conv)
+            return
+        
+        send_whatsapp(phone_full, "Tapez un numéro (1-6) ou écrivez directement :\n_Ex: email@client.com, remise 10%..._")
         return
     
     if state == State.DEVIS_MODIFIER:
