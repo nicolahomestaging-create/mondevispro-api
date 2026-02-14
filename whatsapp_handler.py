@@ -940,6 +940,41 @@ def transcribe_audio(audio_url: str) -> str:
 # FORMATAGE — v9 : plus propre, plus clair
 # =============================================================================
 
+def auto_titre_projet(prestations: List[Dict]) -> str:
+    """Génère un titre de projet court à partir des descriptions des prestations"""
+    if not prestations:
+        return "Travaux"
+    
+    # Extraire les descriptions nettoyées
+    descriptions = []
+    for p in prestations:
+        desc = p.get("description", "").strip()
+        if not desc:
+            continue
+        # Garder juste le premier mot significatif (ex: "Carrelage sol cuisine" → "Carrelage")
+        # Sauf si c'est court, on garde tel quel
+        if len(desc) > 25:
+            desc = desc.split()[0].capitalize() if desc.split() else desc
+        descriptions.append(desc)
+    
+    if not descriptions:
+        return "Travaux"
+    
+    if len(descriptions) == 1:
+        return descriptions[0][:50]
+    
+    if len(descriptions) == 2:
+        titre = f"{descriptions[0]} & {descriptions[1]}"
+    else:
+        titre = f"{descriptions[0]}, {descriptions[1]} & {descriptions[2]}"
+    
+    # Tronquer si trop long
+    if len(titre) > 50:
+        titre = titre[:47] + "..."
+    
+    return titre
+
+
 def fmt_amount(amount) -> str:
     """Formate un montant : 2760 → '2 760€', 800.50 → '800,50€'"""
     try:
@@ -3199,10 +3234,14 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
         total_tva = total_ht_final * (tva_taux / 100)
         total_ttc = total_ht_final + total_tva
         
+        # Auto-générer le titre du projet si pas renseigné
+        titre = data.get("titre_projet") or auto_titre_projet(data.get("prestations", []))
+        data["titre_projet"] = titre
+        
         saved = save_devis_to_dashboard(
             entreprise_id=entreprise["id"], numero_devis="TEMP",
             client_nom=data.get("client_nom", ""), client_email=data.get("client_email"),
-            client_telephone=data.get("client_tel"), titre_projet=data.get("titre_projet"),
+            client_telephone=data.get("client_tel"), titre_projet=titre,
             prestations=prestations_for_db, total_ht=total_ht_final, total_ttc=total_ttc,
             pdf_url=None, word_url=None, remise_type=remise_type,
             remise_value=remise_valeur, delai=data.get("delai"),
