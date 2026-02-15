@@ -465,12 +465,20 @@ def invalidate_entreprise_cache(phone: str):
 
 # ==================== GESTION DES PLANS ====================
 
-FREE_DEVIS_LIMIT = 5
+FREE_DEVIS_LIMIT = 3
 
 def get_user_plan(entreprise: Dict) -> str:
+    """Retourne 'pro' ou 'free' basé sur le statut d'abonnement"""
+    # Priorité 1 : subscription_status (géré par Stripe webhooks)
+    sub_status = (entreprise.get("subscription_status") or "").lower().strip()
+    if sub_status in ("active", "trialing"):
+        return "pro"
+    
+    # Priorité 2 : champ plan legacy (migration)
     plan = (entreprise.get("plan") or entreprise.get("subscription") or "free").lower().strip()
     if plan in ["business", "pro", "premium", "paid"]:
-        return "business"
+        return "pro"
+    
     return "free"
 
 
@@ -494,24 +502,24 @@ def count_devis_this_month(entreprise_id: str) -> int:
 
 def check_can_create_devis(entreprise: Dict) -> tuple:
     plan = get_user_plan(entreprise)
-    if plan == "business":
+    if plan == "pro":
         return True, "", -1
     count = count_devis_this_month(entreprise["id"])
     remaining = FREE_DEVIS_LIMIT - count
     if remaining <= 0:
-        return False, f"📊 Vous avez atteint la limite de *{FREE_DEVIS_LIMIT} devis/mois* du plan gratuit.\n\n🚀 Passez à *Vocario Business* pour des devis illimités !\n\n👉 *vocario.fr/upgrade*{NAV_MENU_ONLY}", 0
+        return False, f"📊 Vous avez atteint la limite de *{FREE_DEVIS_LIMIT} devis/mois* du plan gratuit.\n\n🚀 Passez à *Vocario Pro* pour tout débloquer !\n\n👉 *vocario.fr/upgrade*{NAV_MENU_ONLY}", 0
     return True, "", remaining
 
 
-def is_business(entreprise: Dict) -> bool:
-    return get_user_plan(entreprise) == "business"
+def is_pro(entreprise: Dict) -> bool:
+    return get_user_plan(entreprise) == "pro"
 
 
 UPGRADE_LINK = "vocario.fr/upgrade"
 
-UPGRADE_MSG_FACTURES = f"🔒 Les *factures* sont réservées au plan *Vocario Business* (15€ HT/mois).\n\n✅ Devis & factures illimités\n✅ Signature électronique\n✅ Relances automatiques\n\n👉 *{UPGRADE_LINK}*{NAV_MENU_ONLY}"
+UPGRADE_MSG_FACTURES = f"🔒 Les *factures* sont réservées au plan *Vocario Pro* (15€ HT/mois).\n\n✅ Devis & factures illimités\n✅ Signature électronique\n✅ Relances automatiques\n\n👉 *{UPGRADE_LINK}*{NAV_MENU_ONLY}"
 
-UPGRADE_MSG_RELANCES = f"🔒 Les *relances* sont réservées au plan *Vocario Business*.\n\n👉 *{UPGRADE_LINK}*{NAV_MENU_ONLY}"
+UPGRADE_MSG_RELANCES = f"🔒 Les *relances* sont réservées au plan *Vocario Pro*.\n\n👉 *{UPGRADE_LINK}*{NAV_MENU_ONLY}"
 
 
 def get_devis_list(entreprise_id: str, limit: int = 10) -> List[Dict]:
@@ -1147,11 +1155,11 @@ def format_documents_list(devis_list: List[Dict], factures_orphelines: List[Dict
     return "\n".join(lines), doc_index
 
 
-def format_doc_detail(doc_type: str, doc: Dict, devis_parent: Dict = None, user_plan: str = "business") -> tuple:
+def format_doc_detail(doc_type: str, doc: Dict, devis_parent: Dict = None, user_plan: str = "pro") -> tuple:
     """v9 : Détail document — contextuel, factures en A/B/C, actions adaptées"""
     lines = []
     facture_index = {}
-    is_free = (user_plan != "business")
+    is_free = (user_plan != "pro")
     
     if doc_type == "devis":
         client = doc.get("client_nom", "")
@@ -1225,7 +1233,7 @@ def format_doc_detail(doc_type: str, doc: Dict, devis_parent: Dict = None, user_
                 lines.append(f"*{action_num}.* 📧 Envoyer email + signature ✍️")
             action_num += 1
             
-            # Actions de facturation (Business)
+            # Actions de facturation (Pro)
             if not is_free and not has_finale:
                 total_acomptes = sum(float(f.get("total_ttc", 0)) for f in factures if f.get("type_facture") == "acompte" and f.get("statut") in ("payee", "paye"))
                 reste = float(total) - total_acomptes
@@ -1420,13 +1428,13 @@ def handle_message(phone: str, message: str, media_url: str = None, media_type: 
         reset_conv(phone)
         entreprise = get_entreprise(phone)
         if entreprise:
-            business = is_business(entreprise)
+            user_is_pro = is_pro(entreprise)
             # Récupérer le prénom/nom du gérant
             gerant = entreprise.get("gerant", "")
             prenom = gerant.split()[0] if gerant else ""
             greeting = f"👋 Bonjour{' ' + prenom if prenom else ''} !"
             
-            if business:
+            if user_is_pro:
                 stats = get_activity_dashboard(entreprise["id"])
                 dashboard_parts = []
                 if stats["devis_en_attente"] > 0:
@@ -1462,8 +1470,8 @@ def handle_message(phone: str, message: str, media_url: str = None, media_type: 
         send_whatsapp(phone_full, "❌ Annulé." + NAV_MENU_ONLY)
         return
     
-    if msg_lower in ["upgrade", "business", "passer business", "passer pro", "abonnement"]:
-        send_whatsapp(phone_full, f"""🚀 *Vocario Business* — 15€ HT/mois
+    if msg_lower in ["upgrade", "business", "passer pro", "abonnement"]:
+        send_whatsapp(phone_full, f"""🚀 *Vocario Pro* — 15€ HT/mois
 
 ✅ Devis & factures *illimités*
 ✅ Signature électronique
@@ -1536,8 +1544,8 @@ def handle_message(phone: str, message: str, media_url: str = None, media_type: 
                 send_whatsapp(phone_full, limit_msg)
                 return
             
-            # Auto-complétion clients (Business)
-            if is_business(entreprise):
+            # Auto-complétion clients (Pro)
+            if is_pro(entreprise):
                 clients = get_recent_clients(entreprise["id"])
                 if clients:
                     lines = ["📝 *Nouveau devis*\n", "👤 Choisissez un client récent :\n"]
@@ -1585,14 +1593,14 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
 💬 Besoin d'aide ? *contact@vocario.fr*{NAV_MENU_ONLY}""")
             return
         
-        # Dupliquer (Business)
+        # Dupliquer (Pro)
         if msg_lower in ["4", "dupliquer", "copier", "dupliquer devis"]:
             entreprise = get_entreprise(phone)
             if not entreprise:
                 send_whatsapp(phone_full, "Entreprise non trouvée 🤔" + NAV_MENU_ONLY)
                 return
-            if not is_business(entreprise):
-                send_whatsapp(phone_full, f"🔒 La *duplication* est réservée au plan Business.\n\n👉 *{UPGRADE_LINK}*{NAV_MENU_ONLY}")
+            if not is_pro(entreprise):
+                send_whatsapp(phone_full, f"🔒 La *duplication* est réservée au plan Pro.\n\n👉 *{UPGRADE_LINK}*{NAV_MENU_ONLY}")
                 return
             devis_list = get_recent_devis_for_duplicate(entreprise["id"])
             if not devis_list:
@@ -1614,13 +1622,13 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
             send_whatsapp(phone_full, "\n".join(lines))
             return
         
-        # Relances (Business)
+        # Relances (Pro)
         if msg_lower in ["5", "relance", "relances", "relancer"]:
             entreprise = get_entreprise(phone)
             if not entreprise:
                 send_whatsapp(phone_full, "Entreprise non trouvée 🤔" + NAV_MENU_ONLY)
                 return
-            if not is_business(entreprise):
+            if not is_pro(entreprise):
                 send_whatsapp(phone_full, UPGRADE_MSG_RELANCES)
                 return
             overdue = get_overdue_documents(entreprise["id"])
@@ -2199,7 +2207,7 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
     if state == State.DEVIS_GENERE:
         devis_info = data.get("devis_genere", {})
         entreprise = get_entreprise(phone)
-        user_is_business = entreprise and is_business(entreprise)
+        user_is_pro = entreprise and is_pro(entreprise)
         
         if msg_lower in ["1", "whatsapp", "envoyer"]:
             tel_client = devis_info.get("client_tel") or data.get("client_tel", "")
@@ -2212,7 +2220,7 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
                 send_whatsapp(phone_full, "📱 Entrez le numéro du client :")
             return
         
-        if user_is_business:
+        if user_is_pro:
             if msg_lower in ["2", "email"]:
                 email_client = devis_info.get("client_email") or data.get("client_email", "")
                 conv["state"] = State.DOCS_SIGNATURE_CHOIX
@@ -2249,10 +2257,10 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
                 send_whatsapp_template(phone_full, TEMPLATE_MENU_SID)
                 return
             if msg_lower in ["email"]:
-                send_whatsapp(phone_full, f"🔒 L'envoi par *email* est réservé au plan Business.\n👉 *{UPGRADE_LINK}*")
+                send_whatsapp(phone_full, f"🔒 L'envoi par *email* est réservé au plan Pro.\n👉 *{UPGRADE_LINK}*")
                 return
             if msg_lower in ["acompte", "facture"]:
-                send_whatsapp(phone_full, f"🔒 Les *factures* sont réservées au plan Business.\n👉 *{UPGRADE_LINK}*")
+                send_whatsapp(phone_full, f"🔒 Les *factures* sont réservées au plan Pro.\n👉 *{UPGRADE_LINK}*")
                 return
         
         send_whatsapp(phone_full, "Tapez un numéro pour choisir")
@@ -2430,8 +2438,8 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
             
             if action == "email":
                 entreprise = get_entreprise(phone)
-                if entreprise and not is_business(entreprise):
-                    send_whatsapp(phone_full, f"🔒 L'envoi par *email* est réservé au plan Business.\n👉 *{UPGRADE_LINK}*")
+                if entreprise and not is_pro(entreprise):
+                    send_whatsapp(phone_full, f"🔒 L'envoi par *email* est réservé au plan Pro.\n👉 *{UPGRADE_LINK}*")
                     return
                 email = doc.get("client_email", "")
                 conv["state"] = State.DOCS_SIGNATURE_CHOIX
@@ -2447,7 +2455,7 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
             
             if action == "facture_acompte":
                 entreprise = get_entreprise(phone)
-                if entreprise and not is_business(entreprise):
+                if entreprise and not is_pro(entreprise):
                     send_whatsapp(phone_full, UPGRADE_MSG_FACTURES)
                     return
                 conv["state"] = State.FACTURE_ACOMPTE_TAUX
@@ -2458,7 +2466,7 @@ _Ex: Dupont 0612345678 carrelage 30m² 50€_{NAV_MENU_ONLY}""")
             
             if action == "facture_finale":
                 entreprise = get_entreprise(phone)
-                if entreprise and not is_business(entreprise):
+                if entreprise and not is_pro(entreprise):
                     send_whatsapp(phone_full, UPGRADE_MSG_FACTURES)
                     return
                 conv["data"]["selected_devis"] = doc
@@ -3087,9 +3095,9 @@ Comment relancer ?
 # =============================================================================
 
 def _get_favorites_msg(phone: str, conv: Dict) -> str:
-    """Retourne le message de favoris si Business"""
+    """Retourne le message de favoris si Pro"""
     entreprise = get_entreprise(phone)
-    if not entreprise or not is_business(entreprise):
+    if not entreprise or not is_pro(entreprise):
         return ""
     favs = get_frequent_prestations(entreprise["id"])
     if not favs:
@@ -3397,7 +3405,7 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
         pdf_url = upload_to_supabase(filepath_pdf, f"{numero_devis}.pdf")
         
         word_url = None
-        if is_business(entreprise):
+        if is_pro(entreprise):
             filepath_word, _, _, _ = generer_word_devis(devis_request, numero_devis_force=numero_devis)
             word_url = upload_to_supabase(filepath_word, f"{numero_devis}.docx")
         
@@ -3413,7 +3421,7 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
         if pdf_url and pdf_url.startswith("http"):
             send_whatsapp_document(phone_full, pdf_url, f"📄 Devis {numero_devis}")
         
-        user_is_business = is_business(entreprise)
+        user_is_user_is_pro = is_pro(entreprise)
         tel_client = data.get("client_tel", "")
         projet = data.get("titre_projet", "")
         
@@ -3429,7 +3437,7 @@ def _generate_devis(phone: str, phone_full: str, conv: Dict):
         header += f"\n👤 {data.get('client_nom', '')} · 💰 *{fmt_amount(total_ttc_calc)} TTC*"
         header += "\n\nComment on l'envoie ?"
         
-        if user_is_business:
+        if user_is_pro:
             actions = f"\n*1.* 📱 WhatsApp"
             if tel_client:
                 actions += f" → {tel_client}"
