@@ -4,7 +4,7 @@ Génère des devis et factures PDF + Word professionnels
 Version 3.0.0
 """
 
-from fastapi import FastAPI, HTTPException, Form, Request, Header
+from fastapi import FastAPI, HTTPException, Form
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -3096,244 +3096,36 @@ def health_check():
 
 
 # =============================================================================
-# STRIPE — PAIEMENTS & ABONNEMENTS
+# STRIPE — STATUS ENDPOINT (les webhooks/checkout sont gérés côté Next.js)
 # =============================================================================
-
-import stripe
-
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRO_PRICE_ID = os.getenv("STRIPE_PRO_PRICE_ID", "")  # Price ID du plan Pro (15€/mois)
-VOCARIO_FRONTEND_URL = os.getenv("VOCARIO_FRONTEND_URL", "https://vocario.fr")
-
-stripe.api_key = STRIPE_SECRET_KEY
-
-print(f"=== STRIPE CONFIG ===")
-print(f"STRIPE_SECRET_KEY: {'OUI' if STRIPE_SECRET_KEY else 'NON'}")
-print(f"STRIPE_WEBHOOK_SECRET: {'OUI' if STRIPE_WEBHOOK_SECRET else 'NON'}")
-print(f"STRIPE_PRO_PRICE_ID: {STRIPE_PRO_PRICE_ID or 'NON'}")
-
-
-@app.post("/api/stripe/create-checkout")
-async def create_checkout_session(request: Request):
-    """Crée une session Stripe Checkout pour souscrire au plan Pro"""
-    try:
-        body = await request.json()
-        entreprise_id = body.get("entreprise_id")
-        user_email = body.get("email")
-        
-        if not entreprise_id:
-            raise HTTPException(status_code=400, detail="entreprise_id requis")
-        
-        if not STRIPE_PRO_PRICE_ID:
-            raise HTTPException(status_code=500, detail="Stripe non configuré (STRIPE_PRO_PRICE_ID manquant)")
-        
-        # Chercher ou créer le customer Stripe
-        entreprise = None
-        if supabase_client:
-            result = supabase_client.table("entreprises").select("*").eq("id", entreprise_id).execute()
-            if result.data:
-                entreprise = result.data[0]
-        
-        if not entreprise:
-            raise HTTPException(status_code=404, detail="Entreprise non trouvée")
-        
-        stripe_customer_id = entreprise.get("stripe_customer_id")
-        
-        if not stripe_customer_id:
-            # Créer un customer Stripe
-            customer = stripe.Customer.create(
-                email=user_email or entreprise.get("email", ""),
-                name=entreprise.get("nom", ""),
-                metadata={"entreprise_id": entreprise_id},
-            )
-            stripe_customer_id = customer.id
-            
-            # Sauvegarder le customer ID en base
-            supabase_client.table("entreprises").update({
-                "stripe_customer_id": stripe_customer_id,
-            }).eq("id", entreprise_id).execute()
-        
-        # Créer la session Checkout
-        session = stripe.checkout.Session.create(
-            customer=stripe_customer_id,
-            payment_method_types=["card"],
-            line_items=[{"price": STRIPE_PRO_PRICE_ID, "quantity": 1}],
-            mode="subscription",
-            success_url=f"{VOCARIO_FRONTEND_URL}/dashboard?checkout=success",
-            cancel_url=f"{VOCARIO_FRONTEND_URL}/pricing?checkout=cancel",
-            metadata={"entreprise_id": entreprise_id},
-            allow_promotion_codes=True,
-            billing_address_collection="auto",
-            tax_id_collection={"enabled": True},
-        )
-        
-        return {"checkout_url": session.url, "session_id": session.id}
-    
-    except stripe.error.StripeError as e:
-        print(f"❌ Stripe error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        print(f"❌ Checkout error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/stripe/portal")
-async def create_portal_session(request: Request):
-    """Redirige vers le Stripe Billing Portal pour gérer l'abonnement"""
-    try:
-        body = await request.json()
-        entreprise_id = body.get("entreprise_id")
-        
-        if not entreprise_id or not supabase_client:
-            raise HTTPException(status_code=400, detail="entreprise_id requis")
-        
-        result = supabase_client.table("entreprises").select("stripe_customer_id").eq("id", entreprise_id).execute()
-        if not result.data or not result.data[0].get("stripe_customer_id"):
-            raise HTTPException(status_code=404, detail="Pas d'abonnement Stripe trouvé")
-        
-        session = stripe.billing_portal.Session.create(
-            customer=result.data[0]["stripe_customer_id"],
-            return_url=f"{VOCARIO_FRONTEND_URL}/dashboard",
-        )
-        
-        return {"portal_url": session.url}
-    
-    except stripe.error.StripeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/stripe/webhook")
-async def stripe_webhook(request: Request):
-    """
-    Webhook Stripe — gère les événements de paiement.
-    C'est la SOURCE DE VÉRITÉ pour le plan de l'utilisateur.
-    """
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
-    
-    try:
-        if STRIPE_WEBHOOK_SECRET:
-            event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-        else:
-            # En dev/test sans webhook secret
-            event = stripe.Event.construct_from(json.loads(payload), stripe.api_key)
-    except (ValueError, stripe.error.SignatureVerificationError) as e:
-        print(f"❌ Stripe webhook signature error: {e}")
-        raise HTTPException(status_code=400, detail="Invalid signature")
-    
-    event_type = event["type"]
-    data = event["data"]["object"]
-    
-    print(f"📨 Stripe event: {event_type}")
-    
-    # ---- CHECKOUT TERMINÉ ----
-    if event_type == "checkout.session.completed":
-        customer_id = data.get("customer")
-        subscription_id = data.get("subscription")
-        entreprise_id = data.get("metadata", {}).get("entreprise_id")
-        
-        if entreprise_id and supabase_client:
-            update_data = {
-                "stripe_customer_id": customer_id,
-                "stripe_subscription_id": subscription_id,
-                "subscription_status": "active",
-                "subscription_plan": "pro",
-            }
-            supabase_client.table("entreprises").update(update_data).eq("id", entreprise_id).execute()
-            print(f"✅ Entreprise {entreprise_id} → plan Pro (checkout completed)")
-        elif customer_id and supabase_client:
-            # Fallback : trouver par stripe_customer_id
-            result = supabase_client.table("entreprises").select("id").eq("stripe_customer_id", customer_id).execute()
-            if result.data:
-                eid = result.data[0]["id"]
-                supabase_client.table("entreprises").update({
-                    "stripe_subscription_id": subscription_id,
-                    "subscription_status": "active",
-                    "subscription_plan": "pro",
-                }).eq("id", eid).execute()
-                print(f"✅ Entreprise {eid} → plan Pro (via customer_id)")
-    
-    # ---- FACTURE PAYÉE (renouvellement mensuel) ----
-    elif event_type == "invoice.paid":
-        customer_id = data.get("customer")
-        subscription_id = data.get("subscription")
-        period_end = data.get("lines", {}).get("data", [{}])[0].get("period", {}).get("end")
-        
-        if customer_id and supabase_client:
-            update_data = {
-                "subscription_status": "active",
-                "subscription_plan": "pro",
-            }
-            if period_end:
-                from datetime import timezone
-                update_data["subscription_current_period_end"] = datetime.fromtimestamp(period_end, tz=timezone.utc).isoformat()
-            
-            supabase_client.table("entreprises").update(update_data).eq("stripe_customer_id", customer_id).execute()
-            print(f"✅ Renouvellement confirmé pour customer {customer_id}")
-    
-    # ---- PAIEMENT ÉCHOUÉ ----
-    elif event_type == "invoice.payment_failed":
-        customer_id = data.get("customer")
-        
-        if customer_id and supabase_client:
-            supabase_client.table("entreprises").update({
-                "subscription_status": "past_due",
-            }).eq("stripe_customer_id", customer_id).execute()
-            print(f"⚠️ Paiement échoué pour customer {customer_id} → past_due")
-            
-            # TODO: envoyer email + WhatsApp de relance
-    
-    # ---- ABONNEMENT MIS À JOUR (upgrade/downgrade) ----
-    elif event_type == "customer.subscription.updated":
-        customer_id = data.get("customer")
-        status = data.get("status")  # active, past_due, canceled, trialing
-        
-        if customer_id and supabase_client:
-            update_data = {"subscription_status": status}
-            
-            if status == "canceled":
-                update_data["subscription_plan"] = "free"
-                print(f"⚠️ Abonnement annulé pour customer {customer_id} → free")
-            elif status in ("active", "trialing"):
-                update_data["subscription_plan"] = "pro"
-            
-            supabase_client.table("entreprises").update(update_data).eq("stripe_customer_id", customer_id).execute()
-    
-    # ---- ABONNEMENT SUPPRIMÉ ----
-    elif event_type == "customer.subscription.deleted":
-        customer_id = data.get("customer")
-        
-        if customer_id and supabase_client:
-            supabase_client.table("entreprises").update({
-                "subscription_status": "canceled",
-                "subscription_plan": "free",
-                "stripe_subscription_id": None,
-            }).eq("stripe_customer_id", customer_id).execute()
-            print(f"❌ Abonnement supprimé pour customer {customer_id} → free")
-    
-    return {"received": True}
-
 
 @app.get("/api/stripe/status/{entreprise_id}")
 async def get_subscription_status(entreprise_id: str):
-    """Retourne le statut d'abonnement d'une entreprise"""
+    """Retourne le statut d'abonnement d'une entreprise (utilisé par le dashboard et WhatsApp)"""
     if not supabase_client:
         raise HTTPException(status_code=500, detail="DB non disponible")
     
     result = supabase_client.table("entreprises").select(
-        "subscription_plan, subscription_status, subscription_current_period_end, stripe_customer_id"
+        "plan, subscription_plan, subscription_status, subscription_current_period_end, stripe_customer_id"
     ).eq("id", entreprise_id).execute()
     
     if not result.data:
         raise HTTPException(status_code=404, detail="Entreprise non trouvée")
     
     e = result.data[0]
+    # Déterminer le plan effectif
+    sub_status = (e.get("subscription_status") or "").lower()
+    sub_plan = (e.get("subscription_plan") or e.get("plan") or "free").lower()
+    
+    is_active = sub_status in ("active", "trialing")
+    effective_plan = "pro" if (is_active and sub_plan in ("pro", "business")) else "free"
+    
     return {
-        "plan": e.get("subscription_plan", "free"),
-        "status": e.get("subscription_status", "free"),
+        "plan": effective_plan,
+        "status": sub_status or "free",
         "period_end": e.get("subscription_current_period_end"),
         "has_stripe": bool(e.get("stripe_customer_id")),
+        "is_trial": sub_status == "trialing",
     }
 
 
